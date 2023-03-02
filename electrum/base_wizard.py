@@ -145,9 +145,9 @@ class BaseWizard(Logger):
         ])
         wallet_kinds = [
             ('standard',  _("Standard wallet")),
-            ('2fa', _("Wallet with two-factor authentication")),
-            ('multisig',  _("Multi-signature wallet")),
-            ('imported',  _("Import Bitnet addresses or private keys")),
+         #   ('2fa', _("Wallet with two-factor authentication")),
+         #   ('multisig',  _("Multi-signature wallet")),
+          #  ('imported',  _("Import Bitnet addresses or private keys")),
         ]
         choices = [pair for pair in wallet_kinds if pair[0] in wallet_types]
         self.choice_dialog(title=title, message=message, choices=choices, run_next=self.on_wallet_type)
@@ -209,10 +209,10 @@ class BaseWizard(Logger):
             choices = [
                 ('choose_seed_type', _('Create a new seed')),
                 ('restore_from_seed', _('I already have a seed')),
-                ('restore_from_key', _('Use a master key')),
+            #    ('restore_from_key', _('Use a master key')),
             ]
-            if not self.is_kivy:
-                choices.append(('choose_hw_device',  _('Use a hardware device')))
+#            if not self.is_kivy:
+             #   choices.append(('choose_hw_device',  _('Use a hardware device')))
         else:
             message = _('Add a cosigner to your multi-sig wallet')
             choices = [
@@ -226,8 +226,8 @@ class BaseWizard(Logger):
 
     def import_addresses_or_keys(self):
         v = lambda x: keystore.is_address_list(x) or keystore.is_private_key_list(x, raise_on_error=True)
-        title = _("Import Bitnet Addresses")
-        message = _("Enter a list of Bitnet addresses (this will create a watching-only wallet), or a list of private keys.")
+       # title = _("Import Bitnet Addresses")
+       # message = _("Enter a list of Bitnet addresses (this will create a watching-only wallet), or a list of private keys.")
         self.add_xpub_dialog(title=title, message=message, run_next=self.on_import,
                              is_valid=v, allow_multi=True, show_wif_help=True)
 
