@@ -28,7 +28,7 @@ import aiorpcx
 
 from .util import bh2u, TxMinedInfo, NetworkJobOnDefaultServer
 from .crypto import sha256d
-from .bitnet import hash_decode, hash_encode
+from .bitcoin import hash_decode, hash_encode
 from .transaction import Transaction
 from .blockchain import hash_header
 from .interface import GracefulDisconnect
@@ -162,9 +162,9 @@ class SPV(NetworkJobOnDefaultServer):
     @classmethod
     def _raise_if_valid_tx(cls, raw_tx: str):
         # If an inner node of the merkle proof is also a valid tx, chances are, this is an attack.
-        # https://lists.linuxfoundation.org/pipermail/bitnet-dev/2018-June/016105.html
-        # https://lists.linuxfoundation.org/pipermail/bitnet-dev/attachments/20180609/9f4f5b1f/attachment-0001.pdf
-        # https://bitnet.stackexchange.com/questions/76121/how-is-the-leaf-node-weakness-in-merkle-trees-exploitable/76122#76122
+        # https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2018-June/016105.html
+        # https://lists.linuxfoundation.org/pipermail/bitcoin-dev/attachments/20180609/9f4f5b1f/attachment-0001.pdf
+        # https://bitcoin.stackexchange.com/questions/76121/how-is-the-leaf-node-weakness-in-merkle-trees-exploitable/76122#76122
         tx = Transaction(raw_tx)
         try:
             tx.deserialize()

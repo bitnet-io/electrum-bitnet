@@ -48,10 +48,10 @@ from .util import (log_exceptions, ignore_exceptions,
                    bfh, SilentTaskGroup, make_aiohttp_session, send_exception_to_crash_reporter,
                    is_hash256_str, is_non_negative_integer, MyEncoder, NetworkRetryManager,
                    nullcontext)
-from .bitnet import COIN
+from .bitcoin import COIN
 from . import constants
 from . import blockchain
-from . import bitnet
+from . import bitcoin
 from . import dns_hacks
 from .transaction import Transaction
 from .blockchain import Blockchain, HEADER_SIZE
@@ -902,33 +902,13 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
 
     @staticmethod
     def sanitize_tx_broadcast_response(server_msg) -> str:
-        # Unfortunately, bitnetd and hence the Electrum protocol doesn't return a useful error code.
+        # Unfortunately, bitcoind and hence the Electrum protocol doesn't return a useful error code.
         # So, we use substring matching to grok the error message.
         # server_msg is untrusted input so it should not be shown to the user. see #4968
         server_msg = str(server_msg)
         server_msg = server_msg.replace("\n", r"\n")
-        # https://github.com/bitnet/bitnet/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/policy/policy.cpp
-        # grep "reason ="
-        policy_error_messages = {
-            r"version": _("Transaction uses non-standard version."),
-            r"tx-size": _("The transaction was rejected because it is too large (in bytes)."),
-            r"scriptsig-size": None,
-            r"scriptsig-not-pushonly": None,
-            r"scriptpubkey":
-                ("scriptpubkey\n" +
-                 _("Some of the outputs pay to a non-standard script.")),
-            r"bare-multisig": None,
-            r"dust":
-                (_("Transaction could not be broadcast due to dust outputs.\n"
-                   "Some of the outputs are too small in value, probably lower than 1000 satoshis.\n"
-                   "Check the units, make sure you haven't confused e.g. mBIT and BIT.")),
-            r"multi-op-return": _("The transaction was rejected because it contains multiple OP_RETURN outputs."),
-        }
-        for substring in policy_error_messages:
-            if substring in server_msg:
-                msg = policy_error_messages[substring]
-                return msg if msg else substring
-        # https://github.com/bitnet/bitnet/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/script/script_error.cpp
+
+        # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/script/script_error.cpp
         script_error_messages = {
             r"Script evaluated without error but finished with a false/empty top stack element",
             r"Script failed an OP_VERIFY operation",
@@ -986,10 +966,10 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
         for substring in script_error_messages:
             if substring in server_msg:
                 return substring
-        # https://github.com/bitnet/bitnet/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/validation.cpp
+        # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/validation.cpp
         # grep "REJECT_"
         # grep "TxValidationResult"
-        # should come after script_error.cpp (due to e.g. non-mandatory-script-verify-flag)
+        # should come after script_error.cpp (due to e.g. "non-mandatory-script-verify-flag")
         validation_error_messages = {
             r"coinbase": None,
             r"tx-size-small": None,
@@ -1003,7 +983,7 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
             r"bad-txns-too-many-sigops": None,
             r"mempool min fee not met":
                 ("mempool min fee not met\n" +
-                 _("Your transaction is paying a fee that is so low that the bitnet node cannot "
+                 _("Your transaction is paying a fee that is so low that the bitcoin node cannot "
                    "fit it into its mempool. The mempool is already full of hundreds of megabytes "
                    "of transactions that all pay higher fees. Try to increase the fee.")),
             r"min relay fee not met": None,
@@ -1025,8 +1005,8 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
             if substring in server_msg:
                 msg = validation_error_messages[substring]
                 return msg if msg else substring
-        # https://github.com/bitnet/bitnet/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/rpc/rawtransaction.cpp
-        # https://github.com/bitnet/bitnet/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/util/error.cpp
+        # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/rpc/rawtransaction.cpp
+        # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/util/error.cpp
         # grep "RPC_TRANSACTION"
         # grep "RPC_DESERIALIZATION_ERROR"
         rawtransaction_error_messages = {
@@ -1044,8 +1024,8 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
             if substring in server_msg:
                 msg = rawtransaction_error_messages[substring]
                 return msg if msg else substring
-        # https://github.com/bitnet/bitnet/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/consensus/tx_verify.cpp
-        # https://github.com/bitnet/bitnet/blob/c7ad94428ab6f54661d7a5441e1fdd0ebf034903/src/consensus/tx_check.cpp
+        # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/consensus/tx_verify.cpp
+        # https://github.com/bitcoin/bitcoin/blob/c7ad94428ab6f54661d7a5441e1fdd0ebf034903/src/consensus/tx_check.cpp
         # grep "REJECT_"
         # grep "TxValidationResult"
         tx_verify_error_messages = {
@@ -1070,6 +1050,29 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
         for substring in tx_verify_error_messages:
             if substring in server_msg:
                 msg = tx_verify_error_messages[substring]
+                return msg if msg else substring
+        # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/policy/policy.cpp
+        # grep "reason ="
+        # should come after validation.cpp (due to "tx-size" vs "tx-size-small")
+        # should come after script_error.cpp (due to e.g. "version")
+        policy_error_messages = {
+            r"version": _("Transaction uses non-standard version."),
+            r"tx-size": _("The transaction was rejected because it is too large (in bytes)."),
+            r"scriptsig-size": None,
+            r"scriptsig-not-pushonly": None,
+            r"scriptpubkey":
+                ("scriptpubkey\n" +
+                 _("Some of the outputs pay to a non-standard script.")),
+            r"bare-multisig": None,
+            r"dust":
+                (_("Transaction could not be broadcast due to dust outputs.\n"
+                   "Some of the outputs are too small in value, probably lower than 1000 satoshis.\n"
+                   "Check the units, make sure you haven't confused e.g. mBIT and BIT.")),
+            r"multi-op-return": _("The transaction was rejected because it contains multiple OP_RETURN outputs."),
+        }
+        for substring in policy_error_messages:
+            if substring in server_msg:
+                msg = policy_error_messages[substring]
                 return msg if msg else substring
         # otherwise:
         return _("Unknown error")

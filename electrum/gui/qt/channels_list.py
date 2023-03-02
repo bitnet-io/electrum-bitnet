@@ -22,7 +22,7 @@ from electrum.gui import messages
 
 from .util import (MyTreeView, WindowModalDialog, Buttons, OkButton, CancelButton,
                    EnterButton, WaitingDialog, MONOSPACE_FONT, ColorScheme)
-from .amountedit import BITAmountEdit, FreezableLineEdit
+from .amountedit import BTCAmountEdit, FreezableLineEdit
 from .util import read_QIcon
 
 
@@ -83,12 +83,12 @@ class ChannelsList(MyTreeView):
         for subject in (REMOTE, LOCAL):
             if isinstance(chan, Channel):
                 can_send = chan.available_to_spend(subject) / 1000
-                label = self.parent.format_amount(can_send)
+                label = self.parent.format_amount(can_send, whitespaces=True)
                 other = subject.inverted()
                 bal_other = chan.balance(other)//1000
                 bal_minus_htlcs_other = chan.balance_minus_outgoing_htlcs(other)//1000
                 if bal_other != bal_minus_htlcs_other:
-                    label += ' (+' + self.parent.format_amount(bal_other - bal_minus_htlcs_other) + ')'
+                    label += ' (+' + self.parent.format_amount(bal_other - bal_minus_htlcs_other, whitespaces=True) + ')'
             else:
                 assert isinstance(chan, ChannelBackup)
                 label = ''
@@ -412,7 +412,7 @@ class ChannelsList(MyTreeView):
             trampoline_combo.addItems(trampoline_names)
             trampoline_combo.setCurrentIndex(1)
 
-        amount_e = BITAmountEdit(self.parent.get_decimal_point)
+        amount_e = BTCAmountEdit(self.parent.get_decimal_point)
         # max button
         def spend_max():
             amount_e.setFrozen(max_button.isChecked())

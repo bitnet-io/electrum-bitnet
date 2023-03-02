@@ -41,6 +41,11 @@ from .ecc_fast import _libsecp256k1, SECP256K1_EC_UNCOMPRESSED
 _logger = get_logger(__name__)
 
 
+# Some unit tests need to create ECDSA sigs without grinding the R value (and just use RFC6979).
+# see https://github.com/bitcoin/bitcoin/pull/13666
+ENABLE_ECDSA_R_VALUE_GRINDING = True
+
+
 def string_to_number(b: bytes) -> int:
     return int.from_bytes(b, byteorder='big', signed=False)
 
@@ -353,7 +358,7 @@ POINT_AT_INFINITY = ECPubkey(None)
 
 
 def msg_magic(message: bytes) -> bytes:
-    from .bitnet import var_int
+    from .bitcoin import var_int
     length = bfh(var_int(len(message)))
     return b"\x18Bitnet Signed Message:\n" + length + message
 
@@ -366,7 +371,7 @@ def verify_signature(pubkey: bytes, sig: bytes, h: bytes) -> bool:
     return True
 
 def verify_message_with_address(address: str, sig65: bytes, message: bytes, *, net=None):
-    from .bitnet import pubkey_to_address
+    from .bitcoin import pubkey_to_address
     assert_bytes(sig65, message)
     if net is None: net = constants.net
     try:
@@ -463,11 +468,12 @@ class ECPrivkey(ECPubkey):
             return r, s
 
         r, s = sign_with_extra_entropy(extra_entropy=None)
-        counter = 0
-        while r >= 2**255:  # grind for low R value https://github.com/bitnet/bitnet/pull/13666
-            counter += 1
-            extra_entropy = counter.to_bytes(32, byteorder="little")
-            r, s = sign_with_extra_entropy(extra_entropy=extra_entropy)
+        if ENABLE_ECDSA_R_VALUE_GRINDING:
+            counter = 0
+            while r >= 2**255:  # grind for low R value https://github.com/bitcoin/bitcoin/pull/13666
+                counter += 1
+                extra_entropy = counter.to_bytes(32, byteorder="little")
+                r, s = sign_with_extra_entropy(extra_entropy=extra_entropy)
 
         sig_string = sig_string_from_r_and_s(r, s)
         self.verify_message_hash(sig_string, msg_hash)

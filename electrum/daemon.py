@@ -306,7 +306,7 @@ class WatchTowerServer(AuthenticatedServer):
         await site.start()
 
     async def get_ctn(self, *args):
-        return await self.lnwatcher.sweepstore.get_ctn(*args)
+        return await self.lnwatcher.get_ctn(*args)
 
     async def add_sweep_tx(self, *args):
         return await self.lnwatcher.sweepstore.add_sweep_tx(*args)
@@ -373,7 +373,7 @@ class PayServer(Logger):
         if not request:
             return web.HTTPNotFound()
         pr = make_request(self.config, request)
-        return web.Response(body=pr.SerializeToString(), content_type='application/bitnet-paymentrequest')
+        return web.Response(body=pr.SerializeToString(), content_type='application/bitcoin-paymentrequest')
 
     async def get_status(self, request):
         ws = web.WebSocketResponse()

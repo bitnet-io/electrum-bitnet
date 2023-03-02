@@ -38,7 +38,7 @@ from aiorpcx.curio import (
     TaskGroup, TaskTimeout, CancelledError, timeout_after, sleep
 )
 from aiorpcx.framing import (
-    NewlineFramer, BitnetFramer, BadMagicError, BadChecksumError, OversizedPayloadError
+    NewlineFramer, BitcoinFramer, BadMagicError, BadChecksumError, OversizedPayloadError
 )
 from aiorpcx.jsonrpc import (
     Request, Batch, Notification, ProtocolError, RPCError,
@@ -260,7 +260,7 @@ class SessionBase:
 
 class MessageSession(SessionBase):
     '''Session class for protocols where messages are not tied to responses,
-    such as the Bitnet protocol.
+    such as the Bitcoin protocol.
     '''
     async def _process_messages(self, recv_message):
         while True:
@@ -321,8 +321,8 @@ class MessageSession(SessionBase):
             self._bump_errors()
 
     def default_framer(self):
-        '''Return a bitnet framer.'''
-        return BitnetFramer()
+        '''Return a bitcoin framer.'''
+        return BitcoinFramer()
 
     async def handle_message(self, message):
         '''message is a (command, payload) pair.'''

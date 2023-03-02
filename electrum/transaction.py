@@ -40,10 +40,10 @@ import itertools
 import binascii
 import copy
 
-from . import ecc, bitnet, constants, segwit_addr, bip32
+from . import ecc, bitcoin, constants, segwit_addr, bip32
 from .bip32 import BIP32Node
-from .util import profiler, to_bytes, bh2u, bfh, chunks, is_hex_str
-from .bitnet import (TYPE_ADDRESS, TYPE_SCRIPT, hash_160,
+from .util import profiler, to_bytes, bh2u, bfh, chunks, is_hex_str, parse_max_spend
+from .bitcoin import (TYPE_ADDRESS, TYPE_SCRIPT, hash_160,
                       hash160_to_p2sh, hash160_to_p2pkh, hash_to_segwit_addr,
                       var_int, TOTAL_COIN_SUPPLY_LIMIT_IN_BIT, COIN,
                       int_to_hex, push_script, b58_address_to_hash160,
@@ -88,7 +88,19 @@ class MissingTxInputAmount(Exception):
     pass
 
 
-SIGHASH_ALL = 1
+class Sighash(IntEnum):
+    ALL = 1
+    NONE = 2
+    SINGLE = 3
+    ANYONECANPAY = 0x80
+
+    @classmethod
+    def is_valid(cls, sighash) -> bool:
+        for flag in Sighash:
+            for base_flag in [Sighash.ALL, Sighash.NONE, Sighash.SINGLE]:
+                if (flag & ~0x1f | base_flag) == sighash:
+                    return True
+        return False
 
 
 class TxOutput:
@@ -97,11 +109,13 @@ class TxOutput:
 
     def __init__(self, *, scriptpubkey: bytes, value: Union[int, str]):
         self.scriptpubkey = scriptpubkey
-        self.value = value  # str when the output is set to max: '!'  # in satoshis
+        if not (isinstance(value, int) or parse_max_spend(value) is not None):
+            raise ValueError(f"bad txout value: {value!r}")
+        self.value = value  # int in satoshis; or spend-max-like str
 
     @classmethod
     def from_address_and_value(cls, address: str, value: Union[int, str]) -> Union['TxOutput', 'PartialTxOutput']:
-        return cls(scriptpubkey=bfh(bitnet.address_to_script(address)),
+        return cls(scriptpubkey=bfh(bitcoin.address_to_script(address)),
                    value=value)
 
     def serialize_to_network(self) -> bytes:
@@ -131,7 +145,7 @@ class TxOutput:
             return cls.from_address_and_value(addr, val)
         if _type == TYPE_SCRIPT:
             return cls(scriptpubkey=bfh(addr), value=val)
-        raise Exception(f"unexptected legacy address type: {_type}")
+        raise Exception(f"unexpected legacy address type: {_type}")
 
     @property
     def address(self) -> Optional[str]:
@@ -638,8 +652,8 @@ class Transaction:
             num_sig = max(1, txin.num_sig)
             # we guess that signatures will be 72 bytes long
             # note: DER-encoded ECDSA signatures are 71 or 72 bytes in practice
-            #       See https://bitnet.stackexchange.com/questions/77191/what-is-the-maximum-size-of-a-der-encoded-ecdsa-signature
-            #       We assume low S (as that is a bitnet standardness rule).
+            #       See https://bitcoin.stackexchange.com/questions/77191/what-is-the-maximum-size-of-a-der-encoded-ecdsa-signature
+            #       We assume low S (as that is a bitcoin standardness rule).
             #       We do not assume low R (even though the sigs we create conform), as external sigs,
             #       e.g. from a hw signer cannot be expected to have a low R.
             sig_list = ["00" * 72] * num_sig
@@ -725,14 +739,14 @@ class Transaction:
         elif _type in ['p2wpkh', 'p2wsh']:
             return ''
         elif _type == 'p2wpkh-p2sh':
-            redeem_script = bitnet.p2wpkh_nested_script(pubkeys[0])
+            redeem_script = bitcoin.p2wpkh_nested_script(pubkeys[0])
             return construct_script([redeem_script])
         elif _type == 'p2wsh-p2sh':
             if estimate_size:
                 witness_script = ''
             else:
                 witness_script = self.get_preimage_script(txin)
-            redeem_script = bitnet.p2wsh_nested_script(witness_script)
+            redeem_script = bitcoin.p2wsh_nested_script(witness_script)
             return construct_script([redeem_script])
         raise UnknownTxinType(f'cannot construct scriptSig for txin_type: {_type}')
 
@@ -753,10 +767,10 @@ class Transaction:
         elif txin.script_type in ['p2pkh', 'p2wpkh', 'p2wpkh-p2sh']:
             pubkey = pubkeys[0]
             pkh = bh2u(hash_160(bfh(pubkey)))
-            return bitnet.pubkeyhash_to_p2pkh_script(pkh)
+            return bitcoin.pubkeyhash_to_p2pkh_script(pkh)
         elif txin.script_type == 'p2pk':
             pubkey = pubkeys[0]
-            return bitnet.public_key_to_p2pk_script(pubkey)
+            return bitcoin.public_key_to_p2pk_script(pubkey)
         else:
             raise UnknownTxinType(f'cannot construct preimage_script for txin_type: {txin.script_type}')
 
@@ -894,7 +908,7 @@ class Transaction:
     @classmethod
     def estimated_output_size_for_address(cls, address: str) -> int:
         """Return an estimate of serialized output size in bytes."""
-        script = bitnet.address_to_script(address)
+        script = bitcoin.address_to_script(address)
         return cls.estimated_output_size_for_script(script)
 
     @classmethod
@@ -960,7 +974,7 @@ class Transaction:
         return set(self._script_to_output_idx[script])  # copy
 
     def get_output_idxs_from_address(self, addr: str) -> Set[int]:
-        script = bitnet.address_to_script(addr)
+        script = bitcoin.address_to_script(addr)
         return self.get_output_idxs_from_scriptpubkey(script)
 
     def output_value_for_address(self, addr):
@@ -1245,11 +1259,11 @@ class PartialTxInput(TxInput, PSBTSection):
                                                   f"If a redeemScript is provided, the scriptPubKey must be for that redeemScript")
         if self.witness_script:
             if self.redeem_script:
-                if self.redeem_script != bfh(bitnet.p2wsh_nested_script(self.witness_script.hex())):
+                if self.redeem_script != bfh(bitcoin.p2wsh_nested_script(self.witness_script.hex())):
                     raise PSBTInputConsistencyFailure(f"PSBT input validation: "
                                                       f"If a witnessScript is provided, the redeemScript must be for that witnessScript")
             elif self.address:
-                if self.address != bitnet.script_to_p2wsh(self.witness_script.hex()):
+                if self.address != bitcoin.script_to_p2wsh(self.witness_script.hex()):
                     raise PSBTInputConsistencyFailure(f"PSBT input validation: "
                                                       f"If a witnessScript is provided, the scriptPubKey must be for that witnessScript")
 
@@ -1362,7 +1376,7 @@ class PartialTxInput(TxInput, PSBTSection):
     @property
     def scriptpubkey(self) -> Optional[bytes]:
         if self._trusted_address is not None:
-            return bfh(bitnet.address_to_script(self._trusted_address))
+            return bfh(bitcoin.address_to_script(self._trusted_address))
         if self.utxo:
             out_idx = self.prevout.out_idx
             return self.utxo.outputs()[out_idx].scriptpubkey
@@ -1463,7 +1477,7 @@ class PartialTxInput(TxInput, PSBTSection):
         """Whether this input is native segwit. None means inconclusive."""
         if self._is_native_segwit is None:
             if self.address:
-                self._is_native_segwit = bitnet.is_segwit_address(self.address)
+                self._is_native_segwit = bitcoin.is_segwit_address(self.address)
         return self._is_native_segwit
 
     def is_p2sh_segwit(self) -> Optional[bool]:
@@ -1472,7 +1486,7 @@ class PartialTxInput(TxInput, PSBTSection):
             def calc_if_p2sh_segwit_now():
                 if not (self.address and self.redeem_script):
                     return None
-                if self.address != bitnet.hash160_to_p2sh(hash_160(self.redeem_script)):
+                if self.address != bitcoin.hash160_to_p2sh(hash_160(self.redeem_script)):
                     # not p2sh address
                     return False
                 try:
@@ -1724,7 +1738,7 @@ class PartialTransaction(Transaction):
 
     @classmethod
     def from_io(cls, inputs: Sequence[PartialTxInput], outputs: Sequence[PartialTxOutput], *,
-                locktime: int = None, version: int = None):
+                locktime: int = None, version: int = None, BIP69_sort: bool = True):
         self = cls()
         self._inputs = list(inputs)
         self._outputs = list(outputs)
@@ -1732,7 +1746,8 @@ class PartialTransaction(Transaction):
             self.locktime = locktime
         if version is not None:
             self.version = version
-        self.BIP69_sort()
+        if BIP69_sort:
+            self.BIP69_sort()
         return self
 
     def _serialize_psbt(self, fd) -> None:
@@ -1851,17 +1866,28 @@ class PartialTransaction(Transaction):
         inputs = self.inputs()
         outputs = self.outputs()
         txin = inputs[txin_index]
-        sighash = txin.sighash if txin.sighash is not None else SIGHASH_ALL
-        if sighash != SIGHASH_ALL:
-            raise Exception("only SIGHASH_ALL signing is supported!")
+        sighash = txin.sighash if txin.sighash is not None else Sighash.ALL
+        if not Sighash.is_valid(sighash):
+            raise Exception("SIGHASH_FLAG not supported!")
         nHashType = int_to_hex(sighash, 4)
         preimage_script = self.get_preimage_script(txin)
         if txin.is_segwit():
             if bip143_shared_txdigest_fields is None:
                 bip143_shared_txdigest_fields = self._calc_bip143_shared_txdigest_fields()
-            hashPrevouts = bip143_shared_txdigest_fields.hashPrevouts
-            hashSequence = bip143_shared_txdigest_fields.hashSequence
-            hashOutputs = bip143_shared_txdigest_fields.hashOutputs
+            if not(sighash & Sighash.ANYONECANPAY):
+                hashPrevouts = bip143_shared_txdigest_fields.hashPrevouts
+            else:
+                hashPrevouts = '00' * 32
+            if (not(sighash & Sighash.ANYONECANPAY) and (sighash & 0x1f) != Sighash.SINGLE and (sighash & 0x1f) != Sighash.NONE):
+                hashSequence = bip143_shared_txdigest_fields.hashSequence
+            else:
+                hashSequence = '00' * 32
+            if ((sighash & 0x1f) != Sighash.SINGLE and (sighash & 0x1f) != Sighash.NONE):
+                hashOutputs = bip143_shared_txdigest_fields.hashOutputs
+            elif ((sighash & 0x1f) == Sighash.SINGLE and txin_index < len(outputs)):
+                hashOutputs = bh2u(sha256d(outputs[txin_index].serialize_to_network()))
+            else:
+                hashOutputs = '00' * 32
             outpoint = txin.prevout.serialize_to_network().hex()
             scriptCode = var_int(len(preimage_script) // 2) + preimage_script
             amount = int_to_hex(txin.value_sats(), 8)
@@ -1895,11 +1921,13 @@ class PartialTransaction(Transaction):
     def sign_txin(self, txin_index, privkey_bytes, *, bip143_shared_txdigest_fields=None) -> str:
         txin = self.inputs()[txin_index]
         txin.validate_data(for_signing=True)
+        sighash = txin.sighash if txin.sighash is not None else Sighash.ALL
+        sighash_type = sighash.to_bytes(length=1, byteorder="big").hex()
         pre_hash = sha256d(bfh(self.serialize_preimage(txin_index,
                                                        bip143_shared_txdigest_fields=bip143_shared_txdigest_fields)))
         privkey = ecc.ECPrivkey(privkey_bytes)
         sig = privkey.sign_transaction(pre_hash)
-        sig = bh2u(sig) + '01'  # SIGHASH_ALL
+        sig = bh2u(sig) + sighash_type
         return sig
 
     def is_complete(self) -> bool:

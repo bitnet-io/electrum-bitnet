@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Optional
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
 is_bundle = getattr(sys, 'frozen', False)
-is_local = not is_bundle and os.path.exists(os.path.join(script_dir, "electrum.desktop"))
+is_local = not is_bundle and os.path.exists(os.path.join(script_dir, "electrum-doge.desktop"))
 is_android = 'ANDROID_DATA' in os.environ
 
 if is_local:  # running from source
@@ -63,8 +63,8 @@ def check_imports():
         import aiorpcx
     except ImportError as e:
         sys.exit(f"Error: {str(e)}. Try 'sudo python3 -m pip install <module-name>'")
-    if not ((0, 18, 7) <= aiorpcx._version < (0, 19)):
-        raise RuntimeError(f'aiorpcX version {aiorpcx._version} does not match required: 0.18.7<=ver<0.19')
+#    if not ((0, 18, 7) <= aiorpcx._version < (0, 19)):
+ #       raise RuntimeError(f'aiorpcX version {aiorpcx._version} does not match required: 0.18.7<=ver<0.19')
     # the following imports are for pyinstaller
     from google.protobuf import descriptor
     from google.protobuf import message
@@ -166,7 +166,7 @@ def init_cmdline(config_options, wallet_path, server, *, config: 'SimpleConfig')
 
     config_options['password'] = config_options.get('password') or password
 
-    if cmd.name == 'password':
+    if cmd.name == 'password' and 'new_password' not in config_options:
         new_password = prompt_password('New password:')
         config_options['new_password'] = new_password
 
@@ -313,7 +313,7 @@ def main():
     # config is an object passed to the various constructors (wallet, interface, gui)
     if is_android:
         from jnius import autoclass
-        build_config = autoclass("org.electrum.electrum.BuildConfig")
+        build_config = autoclass("org.electrum.bitnet.BuildConfig")
         config_options = {
             'verbosity': '*' if build_config.DEBUG else '',
             'cmd': 'gui',
@@ -341,10 +341,12 @@ def main():
 
     # check uri
     uri = config_options.get('url')
-    if uri:
-        if not uri.lower().startswith(BITCOIN_BIP21_URI_SCHEME + ':'):
-            print_stderr('unknown command:', uri)
-            sys.exit(1)
+    if uri and not (
+        uri.lower().startswith(BITCOIN_BIP21_URI_SCHEME + ':') or
+        uri.lower().startswith(LIGHTNING_URI_SCHEME + ':')
+    ):
+        print_stderr('unknown command:', uri)
+        sys.exit(1)
 
     config = SimpleConfig(config_options)
 

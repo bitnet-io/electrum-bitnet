@@ -1,4 +1,4 @@
-Electrum - Lightweight Bitnet client
+Electrum - Lightweight Bitcoin client
 =====================================
 
 ::
@@ -63,7 +63,7 @@ Install from your package manager (or from pip)::
 
 If you would like hardware wallet support, see `this`_.
 
-.. _libsecp256k1: https://github.com/bitnet-core/secp256k1
+.. _libsecp256k1: https://github.com/bitcoin-core/secp256k1
 .. _pycryptodomex: https://github.com/Legrandin/pycryptodome
 .. _cryptography: https://github.com/pyca/cryptography
 .. _this: https://github.com/spesmilo/electrum-docs/blob/master/hardware-linux.rst

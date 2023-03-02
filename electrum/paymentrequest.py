@@ -39,11 +39,11 @@ except ImportError:
     # sudo apt-get install protobuf-compiler
     sys.exit("Error: could not find paymentrequest_pb2.py. Create it with 'protoc --proto_path=electrum/ --python_out=electrum/ electrum/paymentrequest.proto'")
 
-from . import bitnet, constants, ecc, util, transaction, x509, rsakey
+from . import bitcoin, constants, ecc, util, transaction, x509, rsakey
 from .util import bh2u, bfh, make_aiohttp_session
 from .invoices import OnchainInvoice
 from .crypto import sha256
-from .bitnet import address_to_script
+from .bitcoin import address_to_script
 from .transaction import PartialTxOutput
 from .network import Network
 from .logging import get_logger, Logger
@@ -55,8 +55,8 @@ if TYPE_CHECKING:
 _logger = get_logger(__name__)
 
 
-REQUEST_HEADERS = {'Accept': 'application/bitnet-paymentrequest', 'User-Agent': 'Electrum'}
-ACK_HEADERS = {'Content-Type':'application/bitnet-payment','Accept':'application/bitnet-paymentack','User-Agent':'Electrum'}
+REQUEST_HEADERS = {'Accept': 'application/bitcoin-paymentrequest', 'User-Agent': 'Electrum'}
+ACK_HEADERS = {'Content-Type':'application/bitcoin-payment','Accept':'application/bitcoin-paymentack','User-Agent':'Electrum'}
 
 ca_path = certifi.where()
 ca_list = None
@@ -81,9 +81,9 @@ async def get_payment_request(url: str) -> 'PaymentRequest':
                 async with session.get(url) as response:
                     resp_content = await response.read()
                     response.raise_for_status()
-                    # Guard against `bitnet:`-URIs with invalid payment request URLs
+                    # Guard against `bitcoin:`-URIs with invalid payment request URLs
                     if "Content-Type" not in response.headers \
-                    or response.headers["Content-Type"] != "application/bitnet-paymentrequest":
+                    or response.headers["Content-Type"] != "application/bitcoin-paymentrequest":
                         data = None
                         error = "payment URL not pointing to a payment request handling server"
                     else:
@@ -357,7 +357,7 @@ def sign_request_with_alias(pr, alias, alias_privkey):
     pr.pki_data = str(alias)
     message = pr.SerializeToString()
     ec_key = ecc.ECPrivkey(alias_privkey)
-    compressed = bitnet.is_compressed_privkey(alias_privkey)
+    compressed = bitcoin.is_compressed_privkey(alias_privkey)
     pr.signature = ec_key.sign_message(message, compressed)
 
 

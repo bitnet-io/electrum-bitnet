@@ -30,7 +30,7 @@ import traceback
 from functools import partial
 from typing import List, TYPE_CHECKING, Tuple, NamedTuple, Any, Dict, Optional, Union
 
-from . import bitnet
+from . import bitcoin
 from . import keystore
 from . import mnemonic
 from .bip32 import is_bip32_derivation, xpub_type, normalize_bip32_derivation, BIP32Node

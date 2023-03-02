@@ -28,7 +28,7 @@
      - consider inflight HTLCs and try to route around them (#7292)
    - bugfix: add more safety checks to avoid "batch RBF" feature
      merging LN funding txs (#7298)
-   - remove HTLC value upper limit of ~42 mBIT (#7328)
+   - remove HTLC value upper limit of ~42 mBTC (#7328)
    - Kivy GUI: implement freezing LN channels (11bb39ee)
  * imported wallets: when enabling the "Use change addresses" option,
    change will now be sent to a random unused imported address. (#7330)
@@ -215,7 +215,7 @@ below are user-visible.
    - smarter node recommendation (to open channels with) (#6705)
  * user interface: some minor changes that aim to improve usability
  * Ledger:
-   - fix enumerating devices with new bitnet app (1.5.1) (b78cbcff)
+   - fix enumerating devices with new bitcoin app (1.5.1) (b78cbcff)
    - fix compat with HW.1 (200f547a)
  * A few other minor bugfixes.
 
@@ -228,11 +228,11 @@ below are user-visible.
    - fix some issues with QR scanning by building zbar ourselves (#6593)
    - when using setup exe, also install a debug binary (#6603)
  * Ledger: fix "The derivation path is unusual" warnings (#6512)
-   (needs Bitnet app 1.4.8+ installed on device)
+   (needs Radiocoin app 1.4.8+ installed on device)
  * A few other minor bugfixes and usability improvements.
 
 # Release 4.0.3 - (Sep 11, 2020)
- * PSBT: restore compatibility with Bitnet Core following CVE-2020-14199:
+ * PSBT: restore compatibility with Radiocoin Core following CVE-2020-14199:
    we now allow a PSBT input to have both UTXO and WITNESS_UTXO (#6429).
    (PSBTs created since 4.0.1 already contained UTXO for segwit inputs)
  * Hardware wallets:
@@ -288,7 +288,7 @@ below are user-visible.
      Channels are not announced ('private'), forwarding is disabled.
      We do not serve gossip queries, only consume them.
    - Submarine swaps: the GUI integrates a service that offers
-     atomically exchanging on-chain and lightning bitnets for a fee.
+     atomically exchanging on-chain and lightning bitcoins for a fee.
      Electrum Technologies runs a central server for this, powered by
      the Boltz backend.
    - Watchtowers: Electrum can run a local watchtower (GUI setting),
@@ -299,7 +299,7 @@ below are user-visible.
      An Electrum daemon can be configured to be used as a remote
      watchtower by setting 'watchtower_address', 'watchtower_user' and
      'watchtower_password'.
- * Partially Signed Bitnet Transactions (PSBT, BIP-174) are supported
+ * Partially Signed Radiocoin Transactions (PSBT, BIP-174) are supported
    (#5721). The previous Electrum partial transaction format is no
    longer supported, i.e. this is an incompatible change. Users should
    make sure that all instances of Electrum they use to co-sign or
@@ -320,7 +320,7 @@ below are user-visible.
      e.g. RBF fee-bumping, LN channel opens, submarine swaps.
    - Editable tx preview dialog that allows e.g. changing the locktime,
      toggling RBF, and manual coinjoins.
- * HTTP PayServer: The configuration of a bitnet-accepting website
+ * HTTP PayServer: The configuration of a bitcoin-accepting website
    using Electrum has been simplified and requires fewer steps (see
    documentation). The Payserver supports BIP70 and Lightning payments.
  * Android:
@@ -338,7 +338,7 @@ below are user-visible.
      by Apple. This required bumping the min macOS version to 10.13.
      Startup times should now be faster on 10.15. (#6128, #6225)
  * Transactions:
-   - we now grind low R for ECDSA signatures to match bitnetd (#5820)
+   - we now grind low R for ECDSA signatures to match bitcoind (#5820)
  * Lots and lots of other minor bugfixes and improvements.
 
 
@@ -403,7 +403,7 @@ below are user-visible.
  * fix Revealer in Windows and MacOS binaries (#5027)
  * fiat rate providers:
    - added CoinGecko.com and CoinCap.io
-   - BitnetAverage now only provides historical exchange rates for
+   - RadiocoinAverage now only provides historical exchange rates for
      paying customers. Changed default provider to CoinGecko.com (#5188)
  * hardware wallets:
    - Ledger: Nano X is now recognized (#5140)
@@ -442,7 +442,7 @@ below are user-visible.
    hw wallets still need to set udev rules themselves.
  * hw wallets: fix a regression during transaction signing that prompts
    the user too many times for confirmations (commit 2729909)
- * transactions now set nVersion to 2, to mimic Bitnet Core
+ * transactions now set nVersion to 2, to mimic Radiocoin Core
  * fix Qt bug that made all hw wallets unusable on Windows 8.1 (#4960)
  * fix bugs in wallet creation wizard that resulted in corrupted
    wallets being created in rare cases (#5082, #5057)
@@ -453,7 +453,7 @@ below are user-visible.
 
  * Do not expose users to server error messages (#4968)
  * Notify users of new releases. Release announcements must be signed,
-   and they are verified byElectrum using a hardcoded Bitnet address.
+   and they are verified byElectrum using a hardcoded Radiocoin address.
  * Hardware wallet fixes (#4991, #4993, #5006)
  * Display only QR code in QRcode Window
  * Fixed code signing on MacOS
@@ -500,7 +500,7 @@ below are user-visible.
    - KeepKey: full segwit support
    - Trezor: refactoring and compat with python-trezor 0.11
    - Digital BitBox: support firmware v5.0.0
- * fix bitnet URI handling when app already running (#4796)
+ * fix bitcoin URI handling when app already running (#4796)
  * Qt listings rewritten:
    the History tab now uses QAbstractItemModel, the other tabs use
    QStandardItemModel. Performance should be better for large wallets.
@@ -525,7 +525,7 @@ below are user-visible.
  * fix Linux distributables: 'typing' was not bundled, needed for python 3.4
  * fix #4626: fix spending from segwit multisig wallets involving a Trezor
    cosigner when using a custom derivation path
- * fix #4491: on Android, if user had set "uBIT" as base unit, app crashed
+ * fix #4491: on Android, if user had set "uBTC" as base unit, app crashed
  * fix #4497: on Android, paying bip70 invoices from cold start did not work
  * Several other minor bugfixes and usability improvements.
 
@@ -641,7 +641,7 @@ below are user-visible.
 
  * Memory-pool based fee estimation. Dynamic fees can target a desired
    depth in the memory pool. This feature is optional, and ETA-based
-   estimates from Bitnet Core are still available. Note that miners
+   estimates from Radiocoin Core are still available. Note that miners
    could exploit this feature, if they conspired and filled the memory
    pool with expensive transactions that never get mined. However,
    since the Electrum client already trusts an Electrum server with
@@ -779,7 +779,7 @@ issue #3374. Users should upgrade to 3.0.5.
       following BIP173. Please note that BIP173 is still in draft
       status, and that other wallets/websites may not support
       it. Thus, you should keep a non-segwit wallet in order to be
-      able to receive bitnets during the transition period. If BIP173
+      able to receive bitcoins during the transition period. If BIP173
       ends up being rejected or substantially modified, your wallet
       may have to be restored from seed. This will not affect funds
       sent to bech32 addresses, and it will not affect the capacity of
@@ -847,7 +847,7 @@ issue #3374. Users should upgrade to 3.0.5.
 # Release 2.9 - Independence (July 27th, 2017)
   * Multiple Chain Validation: Electrum will download and validate
     block headers sent by servers that may follow different branches
-    of a fork in the Bitnet blockchain. Instead of a linear sequence,
+    of a fork in the Radiocoin blockchain. Instead of a linear sequence,
     block headers are organized in a tree structure. Branching points
     are located efficiently using binary search. The purpose of MCV is
     to detect and handle blockchain forks that are invisible to the
@@ -1017,7 +1017,7 @@ issue #3374. Users should upgrade to 3.0.5.
    wallet that has several accounts. Make sure that you have saved
    your seed phrase before you upgrade Electrum.
  * This version introduces a separation between wallets types and
-   keystores types. 'Wallet type' defines the type of Bitnet contract
+   keystores types. 'Wallet type' defines the type of Radiocoin contract
    used in the wallet, while 'keystore type' refers to the method used
    to store private keys. Therefore, so-called 'hardware wallets' will
    be referred to as 'hardware keystores'.
@@ -1154,17 +1154,17 @@ issue #3374. Users should upgrade to 3.0.5.
  * Various GUI improvements
 
 # Release 2.4
- * Payment to DNS names storing a Bitnet addresses (OpenAlias) is
+ * Payment to DNS names storing a Radiocoin addresses (OpenAlias) is
    supported directly, without activating a plugin. The verification
    uses DNSSEC.
  * The DNSSEC verification code was rewritten. The previous code,
    which was part of the OpenAlias plugin, is vulnerable and should
    not be trusted (Electrum 2.0 to 2.3).
- * Payment requests can be signed using Bitnet addresses stored
+ * Payment requests can be signed using Radiocoin addresses stored
    in DNS (OpenAlias). The identity of the requestor is verified using
    DNSSEC.
  * Payment requests signed with OpenAlias keys can be shared as
-   bitnet: URIs, if they are simple (a single address-type
+   bitcoin: URIs, if they are simple (a single address-type
    output). The BIP21 URI scheme is extended with 'name', 'sig',
    'time', 'exp'.
  * Arbitrary m-of-n multisig wallets are supported (n<=15).
@@ -1238,7 +1238,7 @@ issue #3374. Users should upgrade to 3.0.5.
  * A Search Box is available in the GUI (Ctrl-S)
  * Payment requests have an expiration date and can be exported to
    BIP70 files.
- * file: scheme support in BIP72 URIs: "bitnet:?r=file:///..."
+ * file: scheme support in BIP72 URIs: "bitcoin:?r=file:///..."
  * Own addresses are shown in green in the Transaction dialog.
  * Address History dialog.
  * The OpenAlias plugin was improved.
@@ -1327,7 +1327,7 @@ issue #3374. Users should upgrade to 3.0.5.
 
  * Audio Modem plugin: send and receive transactions by sound.
 
- * OpenAlias plugin: send bitnets to aliases verified using DNSSEC.
+ * OpenAlias plugin: send bitcoins to aliases verified using DNSSEC.
 
  * New 'Receive' tab in the GUI:
    - create and manage payment requests, with QR Codes
@@ -1370,7 +1370,7 @@ issue #3374. Users should upgrade to 3.0.5.
 
 * Electrum servers were upgraded to version 0.9. The new server stores
   a Patrica tree of all UTXOs, an idea proposed by Alan Reiner in the
-  bitnettalk forum. This property allows the client to directly
+  bitcointalk forum. This property allows the client to directly
   request the balance of any address. The new commands are:
      1. getaddressbalance <address>
      2. getaddressunspent <address>
@@ -1391,7 +1391,7 @@ issue #3374. Users should upgrade to 3.0.5.
 
 # Release 1.9.6
 * During wallet creation, do not write seed to disk until it is encrypted.
-* Confirmation dialog if the transaction fee is higher than 1mBIT.
+* Confirmation dialog if the transaction fee is higher than 1mBTC.
 * bugfixes
 
 # Release 1.9.5
@@ -1453,7 +1453,7 @@ bugfixes: connection problems, transactions staying unverified
 
 # Release 1.7.3:
 
-* Classic GUI can display amounts in mBIT
+* Classic GUI can display amounts in mBTC
 * Account selector in the classic GUI
 * Changed the way the portable flag uses without supplying a -w argument
 * Classic GUI asks users to enter their seed on wallet creation
@@ -1463,7 +1463,7 @@ bugfixes: connection problems, transactions staying unverified
 
 * Transactions that are in the same block are displayed in chronological order in the history.
 * The client computes transaction priority and rejects zero-fee transactions that need a fee.
-* The default fee was lowered to 200 uBIT per kb.
+* The default fee was lowered to 200 uBTC per kb.
 * Due to an internal format change, your history may be pruned when
   you open your wallet for the first time after upgrading to 1.7.2. If
   this is the case, please visit a full server to restore your full
@@ -1494,7 +1494,7 @@ command. Tab-completions are available.
 
 * The location of the Electrum folder in Windows changed from
 LOCALAPPDATA to APPDATA. Discussion on this topic can be found here:
-https://bitnettalk.org/index.php?topic=144575.0
+https://bitcointalk.org/index.php?topic=144575.0
 
 * Private keys can be exported from within the classic GUI:
   For a single address, use the address menu (right-click).
@@ -1503,7 +1503,7 @@ https://bitnettalk.org/index.php?topic=144575.0
 * It is possible to create, sign and redeem multisig transaction using the
 command line interface.  This is made possible by the following new commands:
     dumpprivkey, listunspent, createmultisig, createrawtransaction, decoderawtransaction, signrawtransaction
-The syntax of these commands is similar to their bitnetd counterpart.
+The syntax of these commands is similar to their bitcoind counterpart.
 For an example, see Gavin's tutorial: https://gist.github.com/gavinandresen/3966071
 
 * Offline wallets now work in a way similar to Armory:
@@ -1512,7 +1512,7 @@ For an example, see Gavin's tutorial: https://gist.github.com/gavinandresen/3966
   3. signed transaction is copied to the online computer, broadcasted by the online client.
   4. All these steps can be done via the command line interface or the classic GUI.
 
-* Many command line commands have been renamed in order to make the syntax consistent with bitnetd.
+* Many command line commands have been renamed in order to make the syntax consistent with bitcoind.
 
 # Release 1.6.2
 
@@ -1527,7 +1527,7 @@ For an example, see Gavin's tutorial: https://gist.github.com/gavinandresen/3966
 
 == Classic GUI
 * Seed and MPK help dialogs were rewritten
-* Point of Sale: requested amounts can be expressed in other currencies and are converted to bitnet.
+* Point of Sale: requested amounts can be expressed in other currencies and are converted to bitcoin.
 
 == Lite GUI
 * The receiving button was removed in favor of a menu item to keep it consistent with the history toggle.

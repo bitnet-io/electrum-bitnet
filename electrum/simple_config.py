@@ -5,7 +5,7 @@ import os
 import stat
 import ssl
 from decimal import Decimal
-from typing import Union, Optional, Dict, Sequence, Tuple
+from typing import Union, Optional
 from numbers import Real
 
 from copy import deepcopy
@@ -20,18 +20,51 @@ from .i18n import _
 from .logging import get_logger, Logger
 
 
-FEE_ETA_TARGETS = [25, 10, 5, 2]
-FEE_DEPTH_TARGETS = [10000000, 5000000, 2000000, 1000000, 500000, 200000, 100000]
-FEE_LN_ETA_TARGET = 2  # note: make sure the network is asking for estimates for this target
+FEE_ETA_TARGETS = [
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+]
+FEE_DEPTH_TARGETS = [
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+]
+#10, 5000000, 2000000, 10, 500000, 200000, 10]
+FEE_LN_ETA_TARGET = 5209 * 1000
+#2  # note: make sure the network is asking for estimates for this target
 
 # satoshi per kbyte
-FEERATE_MAX_DYNAMIC = 1500000
-FEERATE_WARNING_HIGH_FEE = 600000
-FEERATE_FALLBACK_STATIC_FEE = 150000
-FEERATE_DEFAULT_RELAY = 1000
-FEERATE_MAX_RELAY = 50000
-FEERATE_STATIC_VALUES = [1000, 2000, 5000, 10000, 20000, 30000,
-                         50000, 70000, 100000, 150000, 200000, 300000]
+FEERATE_MAX_DYNAMIC = 5209 * 1000
+FEERATE_WARNING_HIGH_FEE = 5209 * 1000
+FEERATE_FALLBACK_STATIC_FEE = 5209 * 1000
+FEERATE_DEFAULT_RELAY = 5209 * 1000
+FEERATE_MAX_RELAY = 5209 * 1000
+FEERATE_STATIC_VALUES = [
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+5209 * 1000,
+]
+#1000, 2000, 5000, 10000, 20000, 30000,
+#                         50000, 70000, 10, 150000, 200000, 300000]
+
+
+
+# Regtest feerate doesn't need Radiocoin's 100x adjustment.
 FEERATE_REGTEST_HARDCODED = 180000  # for eclair compat
 
 FEE_RATIO_HIGH_WARNING = 0.05  # warn user if fee/amount for on-chain tx is higher than this
@@ -65,8 +98,9 @@ class SimpleConfig(Logger):
         # a thread-safe way.
         self.lock = threading.RLock()
 
-        self.mempool_fees = None  # type: Optional[Sequence[Tuple[Union[float, int], int]]]
-        self.fee_estimates = {}  # type: Dict[int, int]
+        self.mempool_fees = {}
+        self.fee_estimates = {}
+        self.fee_estimates_last_updated = {}
         self.last_time_fee_estimates_requested = 0  # zero ensures immediate fees
 
         # The following two functions are there for dependency injection when
@@ -128,11 +162,8 @@ class SimpleConfig(Logger):
         elif self.get('simnet'):
             path = os.path.join(path, 'simnet')
             make_dir(path, allow_symlink=False)
-        elif self.get('signet'):
-            path = os.path.join(path, 'signet')
-            make_dir(path, allow_symlink=False)
 
-        self.logger.info(f"electrum directory {path}")
+        self.logger.info(f"electrum-nmc directory {path}")
         return path
 
     def rename_config_keys(self, config, keypairs, deprecation_warning=False):
@@ -221,7 +252,7 @@ class SimpleConfig(Logger):
         base_unit = self.user_config.get('base_unit')
         if isinstance(base_unit, str):
             self._set_key_in_user_config('base_unit', None)
-            map_ = {'btc':8, 'mbtc':5, 'ubtc':2, 'bits':2, 'sat':0}
+            map_ = {'nmc':8, 'mnmc':5, 'unmc':2, 'bits':2, 'noise':0}
             decimal_point = map_.get(base_unit.lower())
             self._set_key_in_user_config('decimal_point', decimal_point)
 
@@ -268,14 +299,6 @@ class SimpleConfig(Logger):
             if os.path.exists(self.path):  # or maybe not?
                 raise
 
-    def get_backup_dir(self):
-        # this is used to save a backup everytime a channel is created
-        # on Android, the export backup button uses android_backup_dir()
-        if 'ANDROID_DATA' in os.environ:
-            return None
-        else:
-            return self.get('backup_dir')
-
     def get_wallet_path(self, *, use_gui_last_wallet=False):
         """Set the path of the wallet."""
 
@@ -296,7 +319,7 @@ class SimpleConfig(Logger):
         new_path = os.path.join(self.path, "wallets", "default_wallet")
 
         # default path in pre 1.9 versions
-        old_path = os.path.join(self.path, "electrum.dat")
+        old_path = os.path.join(self.path, "electrum-nmc.dat")
         if os.path.exists(old_path) and not os.path.exists(new_path):
             os.rename(old_path, new_path)
 
@@ -335,7 +358,7 @@ class SimpleConfig(Logger):
         slider_pos = max(slider_pos, 0)
         slider_pos = min(slider_pos, len(FEE_ETA_TARGETS))
         if slider_pos < len(FEE_ETA_TARGETS):
-            num_blocks = FEE_ETA_TARGETS[int(slider_pos)]
+            num_blocks = FEE_ETA_TARGETS[slider_pos]
             fee = self.eta_target_to_fee(num_blocks)
         else:
             fee = self.eta_target_to_fee(1)
@@ -351,17 +374,13 @@ class SimpleConfig(Logger):
                 fee = int(fee)
         else:
             fee = self.fee_estimates.get(num_blocks)
-            if fee is not None:
-                fee = int(fee)
         return fee
 
-    def fee_to_depth(self, target_fee: Real) -> Optional[int]:
+    def fee_to_depth(self, target_fee: Real) -> int:
         """For a given sat/vbyte fee, returns an estimate of how deep
         it would be in the current mempool in vbytes.
         Pessimistic == overestimates the depth.
         """
-        if self.mempool_fees is None:
-            return None
         depth = 0
         for fee, s in self.mempool_fees:
             depth += s
@@ -369,18 +388,16 @@ class SimpleConfig(Logger):
                 break
         return depth
 
-    def depth_to_fee(self, slider_pos) -> Optional[int]:
+    def depth_to_fee(self, slider_pos) -> int:
         """Returns fee in sat/kbyte."""
         target = self.depth_target(slider_pos)
         return self.depth_target_to_fee(target)
 
     @impose_hard_limits_on_fee
-    def depth_target_to_fee(self, target: int) -> Optional[int]:
+    def depth_target_to_fee(self, target: int) -> int:
         """Returns fee in sat/kbyte.
         target: desired mempool depth in vbytes
         """
-        if self.mempool_fees is None:
-            return None
         depth = 0
         for fee, s in self.mempool_fees:
             depth += s
@@ -390,45 +407,32 @@ class SimpleConfig(Logger):
             return 0
         # add one sat/byte as currently that is
         # the max precision of the histogram
-        # (well, in case of ElectrumX at least. not for electrs)
         fee += 1
         # convert to sat/kbyte
-        return int(fee * 1000)
+#        return fee * 1000 000 000
+        return fee * 1000000000
 
-    def depth_target(self, slider_pos: int) -> int:
-        """Returns mempool depth target in bytes for a fee slider position."""
+    def depth_target(self, slider_pos):
         slider_pos = max(slider_pos, 0)
         slider_pos = min(slider_pos, len(FEE_DEPTH_TARGETS)-1)
         return FEE_DEPTH_TARGETS[slider_pos]
 
-    def eta_target(self, slider_pos: int) -> int:
-        """Returns 'num blocks' ETA target for a fee slider position."""
-        if slider_pos == len(FEE_ETA_TARGETS):
+    def eta_target(self, i):
+        if i == len(FEE_ETA_TARGETS):
             return 1
-        return FEE_ETA_TARGETS[slider_pos]
+        return FEE_ETA_TARGETS[i]
 
-    def fee_to_eta(self, fee_per_kb: Optional[int]) -> int:
-        """Returns 'num blocks' ETA estimate for given fee rate,
-        or -1 for low fee.
-        """
+    def fee_to_eta(self, fee_per_kb):
         import operator
-        lst = list(self.fee_estimates.items())
-        next_block_fee = self.eta_target_to_fee(1)
-        if next_block_fee is not None:
-            lst += [(1, next_block_fee)]
-        if not lst or fee_per_kb is None:
-            return -1
-        dist = map(lambda x: (x[0], abs(x[1] - fee_per_kb)), lst)
+        l = list(self.fee_estimates.items()) + [(1, self.eta_to_fee(4))]
+        dist = map(lambda x: (x[0], abs(x[1] - fee_per_kb)), l)
         min_target, min_value = min(dist, key=operator.itemgetter(1))
-        if fee_per_kb < self.fee_estimates.get(FEE_ETA_TARGETS[0])/2:
+        if fee_per_kb < self.fee_estimates.get(25)/2:
             min_target = -1
         return min_target
 
-    def depth_tooltip(self, depth: Optional[int]) -> str:
-        """Returns text tooltip for given mempool depth (in vbytes)."""
-        if depth is None:
-            return "unknown from tip"
-        return "%.1f MB from tip" % (depth/1_000_000)
+    def depth_tooltip(self, depth):
+        return "%.1f MB from tip"%(depth/100)
 
     def eta_tooltip(self, x):
         if x < 0:
@@ -438,55 +442,43 @@ class SimpleConfig(Logger):
         else:
             return _('Within {} blocks').format(x)
 
-    def get_fee_target(self):
+    def get_fee_status(self):
         dyn = self.is_dynfee()
         mempool = self.use_mempool_fees()
         pos = self.get_depth_level() if mempool else self.get_fee_level()
         fee_rate = self.fee_per_kb()
         target, tooltip = self.get_fee_text(pos, dyn, mempool, fee_rate)
-        return target, tooltip, dyn
-
-    def get_fee_status(self):
-        target, tooltip, dyn = self.get_fee_target()
         return tooltip + '  [%s]'%target if dyn else target + '  [Static]'
 
-    def get_fee_text(
-            self,
-            slider_pos: int,
-            dyn: bool,
-            mempool: bool,
-            fee_per_kb: Optional[int],
-    ):
+    def get_fee_text(self, pos, dyn, mempool, fee_rate):
         """Returns (text, tooltip) where
         text is what we target: static fee / num blocks to confirm in / mempool depth
         tooltip is the corresponding estimate (e.g. num blocks for a static fee)
 
         fee_rate is in sat/kbyte
         """
-        if fee_per_kb is None:
+        if fee_rate is None:
             rate_str = 'unknown'
-            fee_per_byte = None
         else:
-            fee_per_byte = fee_per_kb/1000
-            rate_str = format_fee_satoshis(fee_per_byte) + ' sat/byte'
+#            fee_rate = fee_rate/1000
+            fee_rate = 1.000
+            rate_str = format_fee_satoshis(fee_rate) + ' noise/byte'
 
         if dyn:
             if mempool:
-                depth = self.depth_target(slider_pos)
+                depth = self.depth_target(pos)
                 text = self.depth_tooltip(depth)
             else:
-                eta = self.eta_target(slider_pos)
+                eta = self.eta_target(pos)
                 text = self.eta_tooltip(eta)
             tooltip = rate_str
-        else:  # using static fees
-            assert fee_per_kb is not None
-            assert fee_per_byte is not None
+        else:
             text = rate_str
             if mempool and self.has_fee_mempool():
-                depth = self.fee_to_depth(fee_per_byte)
+                depth = self.fee_to_depth(fee_rate)
                 tooltip = self.depth_tooltip(depth)
             elif not mempool and self.has_fee_etas():
-                eta = self.fee_to_eta(fee_per_kb)
+                eta = self.fee_to_eta(fee_rate)
                 tooltip = self.eta_tooltip(eta)
             else:
                 tooltip = ''
@@ -500,7 +492,7 @@ class SimpleConfig(Logger):
         maxp = len(FEE_ETA_TARGETS)  # not (-1) to have "next block"
         return min(maxp, self.get('fee_level', 2))
 
-    def get_fee_slider(self, dyn, mempool) -> Tuple[int, int, Optional[int]]:
+    def get_fee_slider(self, dyn, mempool):
         if dyn:
             if mempool:
                 pos = self.get_depth_level()
@@ -519,17 +511,17 @@ class SimpleConfig(Logger):
     def static_fee(self, i):
         return FEERATE_STATIC_VALUES[i]
 
-    def static_fee_index(self, fee_per_kb: Optional[int]) -> int:
-        if fee_per_kb is None:
+    def static_fee_index(self, value):
+        if value is None:
             raise TypeError('static fee cannot be None')
-        dist = list(map(lambda x: abs(x - fee_per_kb), FEERATE_STATIC_VALUES))
+        dist = list(map(lambda x: abs(x - value), FEERATE_STATIC_VALUES))
         return min(range(len(dist)), key=dist.__getitem__)
 
     def has_fee_etas(self):
         return len(self.fee_estimates) == 4
 
-    def has_fee_mempool(self) -> bool:
-        return self.mempool_fees is not None
+    def has_fee_mempool(self):
+        return bool(self.mempool_fees)
 
     def has_dynamic_fees_ready(self):
         if self.use_mempool_fees():
@@ -557,14 +549,14 @@ class SimpleConfig(Logger):
             fee_rate = FEERATE_STATIC_VALUES[slider_pos]
         return fee_rate
 
-    def fee_per_kb(self, dyn: bool=None, mempool: bool=None, fee_level: float=None) -> Optional[int]:
+    def fee_per_kb(self, dyn: bool=None, mempool: bool=None, fee_level: float=None) -> Union[int, None]:
         """Returns sat/kvB fee to pay for a txn.
         Note: might return None.
 
         fee_level: float between 0.0 and 1.0, representing fee slider position
         """
-        if constants.net is constants.BitnetRegtest:
-            return FEERATE_REGTEST_HARDCODED
+      #  if constants.net is constants.BitcoinRegtest:
+       #     return FEERATE_REGTEST_HARDCODED
         if dyn is None:
             dyn = self.is_dynfee()
         if mempool is None:
@@ -581,8 +573,6 @@ class SimpleConfig(Logger):
                 fee_rate = self.eta_to_fee(self.get_fee_level())
         else:
             fee_rate = self.get('fee_per_kb', FEERATE_FALLBACK_STATIC_FEE)
-        if fee_rate is not None:
-            fee_rate = int(fee_rate)
         return fee_rate
 
     def fee_per_byte(self):
@@ -613,10 +603,9 @@ class SimpleConfig(Logger):
         fee_per_byte = quantize_feerate(fee_per_byte)
         return round(fee_per_byte * size)
 
-    def update_fee_estimates(self, nblock_target: int, fee_per_kb: int):
-        assert isinstance(nblock_target, int), f"expected int, got {nblock_target!r}"
-        assert isinstance(fee_per_kb, int), f"expected int, got {fee_per_kb!r}"
-        self.fee_estimates[nblock_target] = fee_per_kb
+    def update_fee_estimates(self, key, value):
+        self.fee_estimates[key] = value
+        self.fee_estimates_last_updated[key] = time.time()
 
     def is_fee_estimates_update_required(self):
         """Checks time since last requested and updated fee estimates.
@@ -654,7 +643,8 @@ class SimpleConfig(Logger):
         text = self.get(key)
         if text:
             try:
-                return NetAddress.from_string(text)
+                host, port = text.split(':')
+                return NetAddress(host, port)
             except:
                 pass
 
@@ -671,7 +661,7 @@ class SimpleConfig(Logger):
         return self.format_amount(amount) + ' '+ self.get_base_unit()
 
     def format_fee_rate(self, fee_rate):
-        return format_fee_satoshis(fee_rate/1000, num_zeros=self.num_zeros) + ' sat/byte'
+        return format_fee_satoshis(fee_rate/1000, num_zeros=self.num_zeros) + ' noise/byte'
 
     def get_base_unit(self):
         return decimal_point_to_base_unit_name(self.decimal_point)
@@ -686,7 +676,7 @@ class SimpleConfig(Logger):
 
 
 def read_user_config(path):
-    """Parse and store the user config settings in electrum.conf into user_config[]."""
+    """Parse and store the user config settings in electrum-nmc.conf into user_config[]."""
     if not path:
         return {}
     config_path = os.path.join(path, "config")

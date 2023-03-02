@@ -41,7 +41,7 @@ from qrcode import exceptions
 
 from electrum.simple_config import SimpleConfig
 from electrum.util import quantize_feerate
-from electrum.bitnet import base_encode, NLOCKTIME_BLOCKHEIGHT_MAX
+from electrum.bitcoin import base_encode, NLOCKTIME_BLOCKHEIGHT_MAX
 from electrum.i18n import _
 from electrum.plugin import run_hook
 from electrum import simple_config
@@ -57,7 +57,7 @@ from .util import (MessageBoxMixin, read_QIcon, Buttons, icon_path,
 
 from .fee_slider import FeeSlider, FeeComboBox
 from .confirm_tx_dialog import TxEditor
-from .amountedit import FeerateEdit, BITAmountEdit
+from .amountedit import FeerateEdit, BTCAmountEdit
 from .locktimeedit import LockTimeEdit
 
 if TYPE_CHECKING:
@@ -820,7 +820,7 @@ class PreviewTxDialog(BaseTxDialog, TxEditor):
         self.feerate_e.textEdited.connect(partial(self.on_fee_or_feerate, self.feerate_e, False))
         self.feerate_e.editingFinished.connect(partial(self.on_fee_or_feerate, self.feerate_e, True))
 
-        self.fee_e = BITAmountEdit(self.main_window.get_decimal_point)
+        self.fee_e = BTCAmountEdit(self.main_window.get_decimal_point)
         self.fee_e.textEdited.connect(partial(self.on_fee_or_feerate, self.fee_e, False))
         self.fee_e.editingFinished.connect(partial(self.on_fee_or_feerate, self.fee_e, True))
 

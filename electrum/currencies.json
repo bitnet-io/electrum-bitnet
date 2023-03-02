@@ -25,7 +25,7 @@
         "BOB",
         "BRL",
         "BSD",
-        "BIT",
+        "BTC",
         "BTN",
         "BWP",
         "BZD",
@@ -172,7 +172,7 @@
     "Bitbank": [
         "JPY"
     ],
-    "BitnetAverage": [
+    "BitcoinAverage": [
         "AED",
         "AFN",
         "ALL",
@@ -341,7 +341,7 @@
         "ZMW",
         "ZWL"
     ],
-    "BitnetVenezuela": [
+    "BitcoinVenezuela": [
         "ARS",
         "ETH",
         "EUR",
@@ -350,7 +350,7 @@
         "VEF",
         "XMR"
     ],
-    "Bitnettoyou": [
+    "Bitcointoyou": [
         "BRL"
     ],
     "Bitso": [
@@ -411,7 +411,7 @@
         "BOB",
         "BRL",
         "BSD",
-        "BIT",
+        "BTC",
         "BTN",
         "BWP",
         "BYR",
@@ -568,7 +568,7 @@
         "BMD",
         "BNB",
         "BRL",
-        "BIT",
+        "BTC",
         "CAD",
         "CHF",
         "CLP",
@@ -639,7 +639,7 @@
         "BRL",
         "BSD",
         "BSV",
-        "BIT",
+        "BTC",
         "BTN",
         "BWP",
         "BYN",
@@ -803,7 +803,7 @@
         "JPY",
         "USD"
     ],
-    "LocalBitnets": [
+    "LocalBitcoins": [
         "AED",
         "ARS",
         "AUD",
@@ -882,7 +882,7 @@
         "XRP",
         "ZAR"
     ],
-    "MercadoBitnet": [
+    "MercadoBitcoin": [
         "BRL"
     ],
     "TheRockTrading": [

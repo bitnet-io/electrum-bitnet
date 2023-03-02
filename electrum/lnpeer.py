@@ -17,14 +17,14 @@ import aiorpcx
 from aiorpcx import TaskGroup
 
 from .crypto import sha256, sha256d
-from . import bitnet, util
+from . import bitcoin, util
 from . import ecc
 from .ecc import sig_string_from_r_and_s, der_sig_from_sig_string
 from . import constants
 from .util import (bh2u, bfh, log_exceptions, ignore_exceptions, chunks, SilentTaskGroup,
                    UnrelatedTransactionException)
 from . import transaction
-from .bitnet import make_op_return
+from .bitcoin import make_op_return
 from .transaction import PartialTxOutput, match_script_against_template
 from .logging import Logger
 from .lnonion import (new_onion_packet, OnionFailureCode, calc_hops_data_for_payment,
@@ -33,7 +33,7 @@ from .lnonion import (new_onion_packet, OnionFailureCode, calc_hops_data_for_pay
                       OnionFailureCodeMetaFlag)
 from .lnchannel import Channel, RevokeAndAck, RemoteCtnTooFarInFuture, ChannelState, PeerState
 from . import lnutil
-from .lnutil import (Outpoint, LocalConfig, RECEIVED, UpdateAddHtlc,
+from .lnutil import (Outpoint, LocalConfig, RECEIVED, UpdateAddHtlc, ChannelConfig,
                      RemoteConfig, OnlyPubkeyKeypair, ChannelConstraints, RevocationStore,
                      funding_output_script, get_per_commitment_secret_from_seed,
                      secret_to_pubkey, PaymentFailure, LnFeatures,
@@ -42,7 +42,6 @@ from .lnutil import (Outpoint, LocalConfig, RECEIVED, UpdateAddHtlc,
                      LightningPeerConnectionClosed, HandshakeFailed,
                      RemoteMisbehaving, ShortChannelID,
                      IncompatibleLightningFeatures, derive_payment_secret_from_payment_preimage,
-                     LN_MAX_FUNDING_SAT, calc_fees_for_commitment_tx,
                      UpfrontShutdownScriptViolation)
 from .lnutil import FeeUpdate, channel_id_from_funding_tx
 from .lntransport import LNTransport, LNTransportBase
@@ -306,7 +305,7 @@ class Peer(Logger):
 
     def on_announcement_signatures(self, chan: Channel, payload):
         if chan.config[LOCAL].was_announced:
-            h, local_node_sig, local_bitnet_sig = self.send_announcement_signatures(chan)
+            h, local_node_sig, local_bitcoin_sig = self.send_announcement_signatures(chan)
         else:
             self.announcement_signatures[chan.channel_id].put_nowait(payload)
 
@@ -532,7 +531,7 @@ class Peer(Logger):
             static_remotekey = bfh(wallet.get_public_key(addr))
         else:
             static_remotekey = None
-        dust_limit_sat = bitnet.DUST_LIMIT_DEFAULT_SAT_LEGACY
+        dust_limit_sat = bitcoin.DUST_LIMIT_DEFAULT_SAT_LEGACY
         reserve_sat = max(funding_sat // 100, dust_limit_sat)
         # for comparison of defaults, see
         # https://github.com/ACINQ/eclair/blob/afa378fbb73c265da44856b4ad0f2128a88ae6c6/eclair-core/src/main/resources/reference.conf#L66
@@ -600,17 +599,6 @@ class Peer(Logger):
         if not self.lnworker.channel_db and not self.lnworker.is_trampoline_peer(self.pubkey):
             raise Exception('Not a trampoline node: ' + str(self.their_features))
 
-        if funding_sat > LN_MAX_FUNDING_SAT:
-            raise Exception(
-                f"MUST set funding_satoshis to less than 2^24 satoshi. "
-                f"{funding_sat} sat > {LN_MAX_FUNDING_SAT}")
-        if push_msat > 1000 * funding_sat:
-            raise Exception(
-                f"MUST set push_msat to equal or less than 1000 * funding_satoshis: "
-                f"{push_msat} msat > {1000 * funding_sat} msat")
-        if funding_sat < lnutil.MIN_FUNDING_SAT:
-            raise Exception(f"funding_sat too low: {funding_sat} < {lnutil.MIN_FUNDING_SAT}")
-
         feerate = self.lnworker.current_feerate_per_kw()
         local_config = self.make_local_config(funding_sat, push_msat, LOCAL)
 
@@ -676,20 +664,18 @@ class Peer(Logger):
             current_per_commitment_point=None,
             upfront_shutdown_script=upfront_shutdown_script
         )
-        remote_config.validate_params(funding_sat=funding_sat)
-        # if channel_reserve_satoshis is less than dust_limit_satoshis within the open_channel message:
-        #     MUST reject the channel.
-        if remote_config.reserve_sat < local_config.dust_limit_sat:
-            raise Exception("violated constraint: remote_config.reserve_sat < local_config.dust_limit_sat")
-        # if channel_reserve_satoshis from the open_channel message is less than dust_limit_satoshis:
-        #     MUST reject the channel.
-        if local_config.reserve_sat < remote_config.dust_limit_sat:
-            raise Exception("violated constraint: local_config.reserve_sat < remote_config.dust_limit_sat")
+        ChannelConfig.cross_validate_params(
+            local_config=local_config,
+            remote_config=remote_config,
+            funding_sat=funding_sat,
+            is_local_initiator=True,
+            initial_feerate_per_kw=feerate,
+        )
 
         # -> funding created
         # replace dummy output in funding tx
         redeem_script = funding_output_script(local_config, remote_config)
-        funding_address = bitnet.redeem_script_to_address('p2wsh', redeem_script)
+        funding_address = bitcoin.redeem_script_to_address('p2wsh', redeem_script)
         funding_output = PartialTxOutput.from_address_and_value(funding_address, funding_sat)
         dummy_output = PartialTxOutput.from_address_and_value(ln_dummy_address(), funding_sat)
         if dummy_output not in funding_tx.outputs(): raise Exception("LN dummy output (err 1)")
@@ -770,6 +756,8 @@ class Peer(Logger):
             'onion_keys': {},
             'data_loss_protect_remote_pcp': {},
             "log": {},
+            "fail_htlc_reasons": {},  # htlc_id -> onion_packet
+            "unfulfilled_htlcs": {},  # htlc_id -> error_bytes, failure_message
             "revocation_store": {},
             "static_remotekey_enabled": self.is_static_remotekey(), # stored because it cannot be "downgraded", per BOLT2
         }
@@ -796,16 +784,6 @@ class Peer(Logger):
         feerate = payload['feerate_per_kw']  # note: we are not validating this
         temp_chan_id = payload['temporary_channel_id']
         local_config = self.make_local_config(funding_sat, push_msat, REMOTE)
-        if funding_sat > LN_MAX_FUNDING_SAT:
-            raise Exception(
-                f"MUST set funding_satoshis to less than 2^24 satoshi. "
-                f"{funding_sat} sat > {LN_MAX_FUNDING_SAT}")
-        if push_msat > 1000 * funding_sat:
-            raise Exception(
-                f"MUST set push_msat to equal or less than 1000 * funding_satoshis: "
-                f"{push_msat} msat > {1000 * funding_sat} msat")
-        if funding_sat < lnutil.MIN_FUNDING_SAT:
-            raise Exception(f"funding_sat too low: {funding_sat} < {lnutil.MIN_FUNDING_SAT}")
 
         upfront_shutdown_script = self.upfront_shutdown_script_from_payload(
             payload, 'open')
@@ -827,26 +805,14 @@ class Peer(Logger):
             current_per_commitment_point=None,
             upfront_shutdown_script=upfront_shutdown_script,
         )
+        ChannelConfig.cross_validate_params(
+            local_config=local_config,
+            remote_config=remote_config,
+            funding_sat=funding_sat,
+            is_local_initiator=False,
+            initial_feerate_per_kw=feerate,
+        )
 
-        remote_config.validate_params(funding_sat=funding_sat)
-        # The receiving node MUST fail the channel if:
-        #     the funder's amount for the initial commitment transaction is not
-        #     sufficient for full fee payment.
-        if remote_config.initial_msat < calc_fees_for_commitment_tx(
-                num_htlcs=0,
-                feerate=feerate,
-                is_local_initiator=False)[REMOTE]:
-            raise Exception(
-                "the funder's amount for the initial commitment transaction "
-                "is not sufficient for full fee payment")
-        # The receiving node MUST fail the channel if:
-        #     both to_local and to_remote amounts for the initial commitment transaction are
-        #     less than or equal to channel_reserve_satoshis (see BOLT 3).
-        if (local_config.initial_msat <= 1000 * payload['channel_reserve_satoshis']
-                and remote_config.initial_msat <= 1000 * payload['channel_reserve_satoshis']):
-            raise Exception(
-                "both to_local and to_remote amounts for the initial commitment "
-                "transaction are less than or equal to channel_reserve_satoshis")
         # note: we ignore payload['channel_flags'],  which e.g. contains 'announce_channel'.
         #       Notably if the remote sets 'announce_channel' to True, we will ignore that too,
         #       but we will not play along with actually announcing the channel (so we keep it private).
@@ -1141,40 +1107,40 @@ class Peer(Logger):
 
     @log_exceptions
     async def handle_announcements(self, chan: Channel):
-        h, local_node_sig, local_bitnet_sig = self.send_announcement_signatures(chan)
+        h, local_node_sig, local_bitcoin_sig = self.send_announcement_signatures(chan)
         announcement_signatures_msg = await self.announcement_signatures[chan.channel_id].get()
         remote_node_sig = announcement_signatures_msg["node_signature"]
-        remote_bitnet_sig = announcement_signatures_msg["bitnet_signature"]
-        if not ecc.verify_signature(chan.config[REMOTE].multisig_key.pubkey, remote_bitnet_sig, h):
-            raise Exception("bitnet_sig invalid in announcement_signatures")
+        remote_bitcoin_sig = announcement_signatures_msg["bitcoin_signature"]
+        if not ecc.verify_signature(chan.config[REMOTE].multisig_key.pubkey, remote_bitcoin_sig, h):
+            raise Exception("bitcoin_sig invalid in announcement_signatures")
         if not ecc.verify_signature(self.pubkey, remote_node_sig, h):
             raise Exception("node_sig invalid in announcement_signatures")
 
         node_sigs = [remote_node_sig, local_node_sig]
-        bitnet_sigs = [remote_bitnet_sig, local_bitnet_sig]
-        bitnet_keys = [chan.config[REMOTE].multisig_key.pubkey, chan.config[LOCAL].multisig_key.pubkey]
+        bitcoin_sigs = [remote_bitcoin_sig, local_bitcoin_sig]
+        bitcoin_keys = [chan.config[REMOTE].multisig_key.pubkey, chan.config[LOCAL].multisig_key.pubkey]
 
         if self.node_ids[0] > self.node_ids[1]:
             node_sigs.reverse()
-            bitnet_sigs.reverse()
+            bitcoin_sigs.reverse()
             node_ids = list(reversed(self.node_ids))
-            bitnet_keys.reverse()
+            bitcoin_keys.reverse()
         else:
             node_ids = self.node_ids
 
         self.send_message("channel_announcement",
             node_signatures_1=node_sigs[0],
             node_signatures_2=node_sigs[1],
-            bitnet_signature_1=bitnet_sigs[0],
-            bitnet_signature_2=bitnet_sigs[1],
+            bitcoin_signature_1=bitcoin_sigs[0],
+            bitcoin_signature_2=bitcoin_sigs[1],
             len=0,
             #features not set (defaults to zeros)
             chain_hash=constants.net.rev_genesis_bytes(),
             short_channel_id=chan.short_channel_id,
             node_id_1=node_ids[0],
             node_id_2=node_ids[1],
-            bitnet_key_1=bitnet_keys[0],
-            bitnet_key_2=bitnet_keys[1]
+            bitcoin_key_1=bitcoin_keys[0],
+            bitcoin_key_2=bitcoin_keys[1]
         )
 
     def mark_open(self, chan: Channel):
@@ -1206,15 +1172,15 @@ class Peer(Logger):
         chan_ann = chan.construct_channel_announcement_without_sigs()
         preimage = chan_ann[256+2:]
         msg_hash = sha256d(preimage)
-        bitnet_signature = ecc.ECPrivkey(chan.config[LOCAL].multisig_key.privkey).sign(msg_hash, sig_string_from_r_and_s)
+        bitcoin_signature = ecc.ECPrivkey(chan.config[LOCAL].multisig_key.privkey).sign(msg_hash, sig_string_from_r_and_s)
         node_signature = ecc.ECPrivkey(self.privkey).sign(msg_hash, sig_string_from_r_and_s)
         self.send_message("announcement_signatures",
             channel_id=chan.channel_id,
             short_channel_id=chan.short_channel_id,
             node_signature=node_signature,
-            bitnet_signature=bitnet_signature
+            bitcoin_signature=bitcoin_signature
         )
-        return msg_hash, node_signature, bitnet_signature
+        return msg_hash, node_signature, bitcoin_signature
 
     def on_update_fail_htlc(self, chan: Channel, payload):
         htlc_id = payload["id"]
@@ -1360,7 +1326,7 @@ class Peer(Logger):
         self.logger.info(f"on_update_add_htlc. chan {chan.short_channel_id}. htlc={str(htlc)}")
         if chan.get_state() != ChannelState.OPEN:
             raise RemoteMisbehaving(f"received update_add_htlc while chan.get_state() != OPEN. state was {chan.get_state()!r}")
-        if cltv_expiry > bitnet.NLOCKTIME_BLOCKHEIGHT_MAX:
+        if cltv_expiry > bitcoin.NLOCKTIME_BLOCKHEIGHT_MAX:
             asyncio.ensure_future(self.lnworker.try_force_closing(chan.channel_id))
             raise RemoteMisbehaving(f"received update_add_htlc with cltv_expiry > BLOCKHEIGHT_MAX. value was {cltv_expiry}")
         # add htlc
@@ -1755,7 +1721,7 @@ class Peer(Logger):
         if chan.config[LOCAL].upfront_shutdown_script:
             scriptpubkey = chan.config[LOCAL].upfront_shutdown_script
         else:
-            scriptpubkey = bfh(bitnet.address_to_script(chan.sweep_address))
+            scriptpubkey = bfh(bitcoin.address_to_script(chan.sweep_address))
         assert scriptpubkey
         # wait until no more pending updates (bolt2)
         chan.set_can_send_ctx_updates(False)
@@ -1778,7 +1744,7 @@ class Peer(Logger):
         if chan.config[LOCAL].upfront_shutdown_script:
             our_scriptpubkey = chan.config[LOCAL].upfront_shutdown_script
         else:
-            our_scriptpubkey = bfh(bitnet.address_to_script(chan.sweep_address))
+            our_scriptpubkey = bfh(bitcoin.address_to_script(chan.sweep_address))
         assert our_scriptpubkey
         # estimate fee of closing tx
         our_sig, closing_tx = chan.make_closing_tx(our_scriptpubkey, their_scriptpubkey, fee_sat=0)
@@ -1862,7 +1828,7 @@ class Peer(Logger):
                     continue
                 self.maybe_send_commitment(chan)
                 done = set()
-                unfulfilled = chan.hm.log.get('unfulfilled_htlcs', {})
+                unfulfilled = chan.unfulfilled_htlcs
                 for htlc_id, (local_ctn, remote_ctn, onion_packet_hex, forwarding_info) in unfulfilled.items():
                     if not chan.hm.is_htlc_irrevocably_added_yet(htlc_proposer=REMOTE, htlc_id=htlc_id):
                         continue

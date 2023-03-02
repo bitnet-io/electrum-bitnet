@@ -54,7 +54,7 @@ from . import pem
 from . import version
 from . import blockchain
 from .blockchain import Blockchain, HEADER_SIZE
-from . import bitnet
+from . import bitcoin
 from . import constants
 from .i18n import _
 from .logging import Logger
@@ -714,7 +714,7 @@ class Interface(Logger):
             if self.tip < constants.net.max_checkpoint():
                 raise GracefulDisconnect('server tip below max checkpoint')
             self._mark_ready()
-            await self._process_header_at_tip()
+           # await self._process_header_at_tip()
             # header processing done
             util.trigger_callback('blockchain_updated')
             util.trigger_callback('network_updated')
@@ -728,7 +728,7 @@ class Interface(Logger):
                 # another interface amended the blockchain
                 self.logger.info(f"skipping header {height}")
                 return
-            _, height = await self.step(height, header)
+#            _, height = await self.step(height, header)
             # in the simple case, height == self.tip+1
             if height <= self.tip:
                 await self.sync_until(height)
@@ -754,6 +754,7 @@ class Interface(Logger):
                 last, height = await self.step(height)
             assert (prev_last, prev_height) != (last, height), 'had to prevent infinite loop in interface.sync_until'
         return last, height
+
 
     async def step(self, height, header=None):
         assert 0 <= height <= self.tip, (height, self.tip)
@@ -784,7 +785,7 @@ class Interface(Logger):
                 self.blockchain.save_header(header)
             return 'catchup', height
 
-        good, bad, bad_header = await self._search_headers_binary(height, bad, bad_header, chain)
+#        good, bad, bad_header = await self._search_headers_binary(height, bad, bad_header, chain)
         return await self._resolve_potential_chain_fork_given_forkpoint(good, bad, bad_header)
 
     async def _search_headers_binary(self, height, bad, bad_header, chain):
@@ -810,12 +811,12 @@ class Interface(Logger):
 
         mock = 'mock' in bad_header and bad_header['mock']['connect'](height)
         real = not mock and self.blockchain.can_connect(bad_header, check_height=False)
- #       if not real and not mock:
-#            raise Exception('unexpected bad header during binary: {}'.format(bad_header))
-  #      _assert_header_does_not_check_against_any_chain(bad_header)
+    #    if not real and not mock:
+        #    raise Exception('unexpected bad header during binary: {}'.format(bad_header))
+     #   _assert_header_does_not_check_against_any_chain(bad_header)
 
-        self.logger.info(f"binary search exited. good {good}, bad {bad}")
-        return good, bad, bad_header
+#        self.logger.info(f"binary search exited. good {good}, bad {bad}")3
+#        return good, bad, bad_header
 
     async def _resolve_potential_chain_fork_given_forkpoint(self, good, bad, bad_header):
         assert good + 1 == bad
@@ -1053,9 +1054,9 @@ class Interface(Logger):
         # check response
         if not res:  # ignore empty string
             return ''
-        if not bitnet.is_address(res):
+        if not bitcoin.is_address(res):
             # note: do not hard-fail -- allow server to use future-type
-            #       bitnet address we do not recognize
+            #       bitcoin address we do not recognize
             self.logger.info(f"invalid donation address from server: {repr(res)}")
             res = ''
         return res
@@ -1066,7 +1067,7 @@ class Interface(Logger):
         res = await self.session.send_request('blockchain.relayfee')
         # check response
         assert_non_negative_int_or_float(res)
-        relayfee = int(res * bitnet.COIN)
+        relayfee = int(res * bitcoin.COIN)
         relayfee = max(0, relayfee)
         return relayfee
 
@@ -1081,7 +1082,7 @@ class Interface(Logger):
         # check response
         if res != -1:
             assert_non_negative_int_or_float(res)
-            res = int(res * bitnet.COIN)
+            res = int(res * bitcoin.COIN)
         return res
 
 

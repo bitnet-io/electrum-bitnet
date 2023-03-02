@@ -54,12 +54,12 @@ from .crypto import sha256
 from . import util
 from .util import (NotEnoughFunds, UserCancelled, profiler,
                    format_satoshis, format_fee_satoshis, NoDynamicFeeEstimates,
-                   WalletFileException, BitnetException, MultipleSpendMaxTxOutputs,
+                   WalletFileException, BitnetException,
                    InvalidPassword, format_time, timestamp_to_datetime, Satoshis,
-                   Fiat, bfh, bh2u, TxMinedInfo, quantize_feerate, create_bip21_uri, OrderedDictWithIndex)
+                   Fiat, bfh, bh2u, TxMinedInfo, quantize_feerate, create_bip21_uri, OrderedDictWithIndex, parse_max_spend)
 from .simple_config import SimpleConfig, FEE_RATIO_HIGH_WARNING, FEERATE_WARNING_HIGH_FEE
-from .bitnet import COIN, TYPE_ADDRESS
-from .bitnet import is_address, address_to_script, is_minikey, relayfee, dust_threshold
+from .bitcoin import COIN, TYPE_ADDRESS
+from .bitcoin import is_address, address_to_script, is_minikey, relayfee, dust_threshold
 from .crypto import sha256d
 from . import keystore
 from .keystore import (load_keystore, Hardware_KeyStore, KeyStore, KeyStoreWithMPK,
@@ -67,7 +67,7 @@ from .keystore import (load_keystore, Hardware_KeyStore, KeyStore, KeyStoreWithM
 from .util import multisig_type
 from .storage import StorageEncryptionVersion, WalletStorage
 from .wallet_db import WalletDB
-from . import transaction, bitnet, coinchooser, paymentrequest, ecc, bip32
+from . import transaction, bitcoin, coinchooser, paymentrequest, ecc, bip32
 from .transaction import (Transaction, TxInput, UnknownTxinType, TxOutput,
                           PartialTransaction, PartialTxInput, PartialTxOutput, TxOutpoint)
 from .plugin import run_hook
@@ -79,7 +79,7 @@ from .contacts import Contacts
 from .interface import NetworkException
 from .mnemonic import Mnemonic
 from .logging import get_logger
-from .lnworker import LNWallet
+#from .lnworker import LNWallet
 from .paymentrequest import PaymentRequest
 from .util import read_json_file, write_json_file, UserFacingException
 
@@ -93,7 +93,7 @@ _logger = get_logger(__name__)
 TX_STATUS = [
     _('Unconfirmed'),
     _('Unconfirmed parent'),
-    _('Paid'),
+    _('paid'),
     _('Local'),
 ]
 
@@ -107,11 +107,11 @@ class BumpFeeStrategy(enum.Enum):
 async def _append_utxos_to_inputs(*, inputs: List[PartialTxInput], network: 'Network',
                                   pubkey: str, txin_type: str, imax: int) -> None:
     if txin_type in ('p2pkh', 'p2wpkh', 'p2wpkh-p2sh'):
-        address = bitnet.pubkey_to_address(txin_type, pubkey)
-        scripthash = bitnet.address_to_scripthash(address)
+        address = bitcoin.pubkey_to_address(txin_type, pubkey)
+        scripthash = bitcoin.address_to_scripthash(address)
     elif txin_type == 'p2pk':
-        script = bitnet.public_key_to_p2pk_script(pubkey)
-        scripthash = bitnet.script_to_scripthash(script)
+        script = bitcoin.public_key_to_p2pk_script(pubkey)
+        scripthash = bitcoin.script_to_scripthash(script)
     else:
         raise Exception(f'unexpected txin_type to sweep: {txin_type}')
 
@@ -119,7 +119,7 @@ async def _append_utxos_to_inputs(*, inputs: List[PartialTxInput], network: 'Net
         prev_tx_raw = await network.get_transaction(item['tx_hash'])
         prev_tx = Transaction(prev_tx_raw)
         prev_txout = prev_tx.outputs()[item['tx_pos']]
-        if scripthash != bitnet.script_to_scripthash(prev_txout.scriptpubkey.hex()):
+        if scripthash != bitcoin.script_to_scripthash(prev_txout.scriptpubkey.hex()):
             raise Exception('scripthash mismatch when sweeping')
         prevout_str = item['tx_hash'] + ':%d' % item['tx_pos']
         prevout = TxOutpoint.from_str(prevout_str)
@@ -130,7 +130,7 @@ async def _append_utxos_to_inputs(*, inputs: List[PartialTxInput], network: 'Net
         txin.pubkeys = [bfh(pubkey)]
         txin.num_sig = 1
         if txin_type == 'p2wpkh-p2sh':
-            txin.redeem_script = bfh(bitnet.p2wpkh_nested_script(pubkey))
+            txin.redeem_script = bfh(bitcoin.p2wpkh_nested_script(pubkey))
         inputs.append(txin)
 
     u = await network.listunspent_for_scripthash(scripthash)
@@ -157,7 +157,7 @@ async def sweep_preparations(privkeys, network: 'Network', imax=100):
     keypairs = {}
     async with TaskGroup() as group:
         for sec in privkeys:
-            txin_type, privkey, compressed = bitnet.deserialize_privkey(sec)
+            txin_type, privkey, compressed = bitcoin.deserialize_privkey(sec)
             await group.spawn(find_utxos_for_privkey(txin_type, privkey, compressed))
             # do other lookups to increase support coverage
             if is_minikey(sec):
@@ -187,7 +187,7 @@ async def sweep(
     inputs, keypairs = await sweep_preparations(privkeys, network, imax)
     total = sum(txin.value_sats() for txin in inputs)
     if fee is None:
-        outputs = [PartialTxOutput(scriptpubkey=bfh(bitnet.address_to_script(to_address)),
+        outputs = [PartialTxOutput(scriptpubkey=bfh(bitcoin.address_to_script(to_address)),
                                    value=total)]
         tx = PartialTransaction.from_io(inputs, outputs)
         fee = config.estimate_fee(tx.estimated_size())
@@ -196,7 +196,7 @@ async def sweep(
     if total - fee < dust_threshold(network):
         raise Exception(_('Not enough funds on address.') + '\nTotal: %d satoshis\nFee: %d\nDust Threshold: %d'%(total, fee, dust_threshold(network)))
 
-    outputs = [PartialTxOutput(scriptpubkey=bfh(bitnet.address_to_script(to_address)),
+    outputs = [PartialTxOutput(scriptpubkey=bfh(bitcoin.address_to_script(to_address)),
                                value=total - fee)]
     if locktime is None:
         locktime = get_locktime_for_new_transaction(network)
@@ -272,7 +272,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
 
     txin_type: str
     wallet_type: str
-    lnworker: Optional['LNWallet']
+  #  lnworker: Optional['LNWallet']
 
     def __init__(self, db: WalletDB, storage: Optional[WalletStorage], *, config: SimpleConfig):
         if not db.is_ready_to_be_used_by_wallet():
@@ -322,7 +322,6 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
             for chan_id, chan in self.lnworker.channels.items():
                 channel_backups[chan_id.hex()] = self.lnworker.create_channel_backup(chan_id)
             new_db.put('channels', None)
-            new_db.put('lightning_xprv', None)
             new_db.put('lightning_privkey2', None)
 
         new_path = os.path.join(backup_dir, self.basename() + '.backup')
@@ -362,7 +361,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
             self.db.put('lightning_privkey2', ln_xprv)
         if self.network:
             self.network.run_from_another_thread(self.stop())
-        self.lnworker = LNWallet(self, ln_xprv)
+       # self.lnworker = LNWallet(self, ln_xprv)
         if self.network:
             self.start_network(self.network)
 
@@ -425,9 +424,9 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         addrs = self.get_receiving_addresses()
         if len(addrs) > 0:
             addr = str(addrs[0])
-            if not bitnet.is_address(addr):
+            if not bitcoin.is_address(addr):
                 neutered_addr = addr[:5] + '..' + addr[-2:]
-                raise WalletFileException(f'The addresses in this wallet are not bitnet addresses.\n'
+                raise WalletFileException(f'The addresses in this wallet are not bitcoin addresses.\n'
                                           f'e.g. {neutered_addr} (length: {len(addr)})')
 
     def check_returned_address_for_corruption(func):
@@ -566,13 +565,13 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         if self.is_watching_only():
             raise Exception(_("This is a watching-only wallet"))
         if not is_address(address):
-            raise Exception(f"Invalid bitnet address: {address}")
+            raise Exception(f"Invalid bitcoin address: {address}")
         if not self.is_mine(address):
             raise Exception(_('Address not in wallet.') + f' {address}')
         index = self.get_address_index(address)
         pk, compressed = self.keystore.get_private_key(index, password)
         txin_type = self.get_txin_type(address)
-        serialized_privkey = bitnet.serialize_privkey(pk, compressed, txin_type)
+        serialized_privkey = bitcoin.serialize_privkey(pk, compressed, txin_type)
         return serialized_privkey
 
     def export_private_key_for_path(self, path: Union[Sequence[int], str], password: Optional[str]) -> str:
@@ -621,7 +620,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
                     if tx_mined_status.conf:
                         status = _("{} confirmations").format(tx_mined_status.conf)
                     else:
-                        status = _('Paid')
+                        status = _('Not verified')
                 elif tx_mined_status.height in (TX_HEIGHT_UNCONF_PARENT, TX_HEIGHT_UNCONFIRMED):
                     status = _('Unconfirmed')
                     if fee is None:
@@ -754,10 +753,13 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         height=self.get_local_height()
         if pr:
             return OnchainInvoice.from_bip70_payreq(pr, height)
-        if '!' in (x.value for x in outputs):
-            amount = '!'
-        else:
-            amount = sum(x.value for x in outputs)
+        amount = 0
+        for x in outputs:
+            if parse_max_spend(x.value):
+                amount = '!'
+                break
+            else:
+                amount += x.value
         timestamp = None
         exp = None
         if URI:
@@ -863,11 +865,11 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         assert isinstance(invoice, OnchainInvoice)
         invoice_amounts = defaultdict(int)  # type: Dict[bytes, int]  # scriptpubkey -> value_sats
         for txo in invoice.outputs:  # type: PartialTxOutput
-            invoice_amounts[txo.scriptpubkey] += 1 if txo.value == '!' else txo.value
+            invoice_amounts[txo.scriptpubkey] += 1 if parse_max_spend(txo.value) else txo.value
         relevant_txs = []
         with self.transaction_lock:
             for invoice_scriptpubkey, invoice_amt in invoice_amounts.items():
-                scripthash = bitnet.script_to_scripthash(invoice_scriptpubkey.hex())
+                scripthash = bitcoin.script_to_scripthash(invoice_scriptpubkey.hex())
                 prevouts_and_values = self.db.get_prevouts_by_scripthash(scripthash)
                 total_received = 0
                 for prevout, v in prevouts_and_values:
@@ -971,7 +973,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
                     item.update(fiat_fields)
                 else:
                     timestamp = item['timestamp'] or now
-                    fiat_value = value / Decimal(bitnet.COIN) * fx.timestamp_rate(timestamp)
+                    fiat_value = value / Decimal(bitcoin.COIN) * fx.timestamp_rate(timestamp)
                     item['fiat_value'] = Fiat(fiat_value, fx.ccy)
                     item['fiat_default'] = True
         return transactions
@@ -1076,7 +1078,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
                 out = {
                     'date': date,
                     'block_height': height,
-                    'BIT_balance': Satoshis(balance),
+                    'BTC_balance': Satoshis(balance),
                 }
                 if show_fiat:
                     ap = self.acquisition_price(coins, fx.timestamp_rate, fx.ccy)
@@ -1085,14 +1087,14 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
                     out['liquidation_price'] = Fiat(lp, fx.ccy)
                     out['unrealized_gains'] = Fiat(lp - ap, fx.ccy)
                     out['fiat_balance'] = Fiat(fx.historical_value(balance, date), fx.ccy)
-                    out['BIT_fiat_price'] = Fiat(fx.historical_value(COIN, date), fx.ccy)
+                    out['BTC_fiat_price'] = Fiat(fx.historical_value(COIN, date), fx.ccy)
                 return out
 
             summary_start = summary_point(start_timestamp, start_height, start_balance, start_coins)
             summary_end = summary_point(end_timestamp, end_height, end_balance, end_coins)
             flow = {
-                'BIT_incoming': Satoshis(income),
-                'BIT_outgoing': Satoshis(expenditures)
+                'BTC_incoming': Satoshis(income),
+                'BTC_outgoing': Satoshis(expenditures)
             }
             if show_fiat:
                 flow['fiat_currency'] = fx.ccy
@@ -1191,7 +1193,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
             if fee is not None:
                 size = tx.estimated_size()
                 fee_per_byte = fee / size
-                extra.append(format_fee_satoshis(fee_per_byte) + ' sat/b')
+                extra.append(format_fee_satoshis(fee_per_byte) + ' radiowaves/b')
             if fee is not None and height in (TX_HEIGHT_UNCONF_PARENT, TX_HEIGHT_UNCONFIRMED) \
                and self.config.has_fee_mempool():
                 exp_n = self.config.fee_to_depth(fee_per_byte)
@@ -1281,7 +1283,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
                 addrs = self.get_change_addresses(slice_start=-self.gap_limit_for_change)
                 change_addrs = [random.choice(addrs)] if addrs else []
         for addr in change_addrs:
-            assert is_address(addr), f"not valid bitnet address: {addr}"
+            assert is_address(addr), f"not valid bitcoin address: {addr}"
             # note that change addresses are not necessarily ismine
             # in which case this is a no-op
             self.check_address_for_corruption(addr)
@@ -1312,7 +1314,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
                 selected_addr = random.choice(addrs)
             else:  # fallback for e.g. imported wallets
                 selected_addr = self.get_receiving_address()
-        assert is_address(selected_addr), f"not valid bitnet address: {selected_addr}"
+        assert is_address(selected_addr), f"not valid bitcoin address: {selected_addr}"
         return selected_addr
 
     def make_unsigned_transaction(
@@ -1324,7 +1326,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
             is_sweep=False,
             rbf=False) -> PartialTransaction:
 
-        if not coins:  # any bitnet tx must have at least 1 input by consensus
+        if not coins:  # any bitcoin tx must have at least 1 input by consensus
             raise NotEnoughFunds()
         if any([c.already_has_some_signatures() for c in coins]):
             raise Exception("Some inputs already contain signatures!")
@@ -1333,12 +1335,13 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         outputs = copy.deepcopy(outputs)
 
         # check outputs
-        i_max = None
+        i_max = []
+        i_max_sum = 0
         for i, o in enumerate(outputs):
-            if o.value == '!':
-                if i_max is not None:
-                    raise MultipleSpendMaxTxOutputs()
-                i_max = i
+            weight = parse_max_spend(o.value)
+            if weight:
+                i_max_sum += weight
+                i_max.append((weight, i))
 
         if fee is None and self.config.fee_per_kb() is None:
             raise NoDynamicFeeEstimates()
@@ -1356,7 +1359,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         else:
             raise Exception(f'Invalid argument fee: {fee}')
 
-        if i_max is None:
+        if len(i_max) == 0:
             # Let the coin chooser select the coins to spend
             coin_chooser = coinchooser.get_coin_chooser(self.config)
             # If there is an unconfirmed RBF tx, merge with it
@@ -1400,13 +1403,21 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
             # note: Actually it might be the case that not all UTXOs from the wallet are
             #       being spent if the user manually selected UTXOs.
             sendable = sum(map(lambda c: c.value_sats(), coins))
-            outputs[i_max].value = 0
+            for (_,i) in i_max:
+                outputs[i].value = 0
             tx = PartialTransaction.from_io(list(coins), list(outputs))
             fee = fee_estimator(tx.estimated_size())
             amount = sendable - tx.output_value() - fee
             if amount < 0:
                 raise NotEnoughFunds()
-            outputs[i_max].value = amount
+            distr_amount = 0
+            for (weight, i) in i_max:
+                val = int((amount/i_max_sum) * weight)
+                outputs[i].value = val
+                distr_amount += val
+
+            (x,i) = i_max[-1]
+            outputs[i].value += (amount - distr_amount)
             tx = PartialTransaction.from_io(list(coins), list(outputs))
 
         # Timelock tx to current height.
@@ -1546,7 +1557,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
             strategies: Sequence[BumpFeeStrategy] = None,
     ) -> PartialTransaction:
         """Increase the miner fee of 'tx'.
-        'new_fee_rate' is the target min rate in sat/vbyte
+        'new_fee_rate' is the target min rate in radiowaves/vbyte
         'coins' is a list of UTXOs we can choose from as potential new inputs to be added
         """
         txid = txid or tx.txid()
@@ -1819,7 +1830,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
     ) -> PartialTransaction:
         """Double-Spend-Cancel: cancel an unconfirmed tx by double-spending
         its inputs, paying ourselves.
-        'new_fee_rate' is the target min rate in sat/vbyte
+        'new_fee_rate' is the target min rate in radiowaves/vbyte
         """
         if not isinstance(tx, PartialTransaction):
             tx = PartialTransaction.from_tx(tx)
@@ -2100,13 +2111,13 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         message = self.get_label(addr)
         amount = req.amount_sat
         extra_query_params = {}
-        if req.time:
-            extra_query_params['time'] = str(int(req.time))
-        if req.exp:
-            extra_query_params['exp'] = str(int(req.exp))
+        #if req.time:
+        #    extra_query_params['time'] = str(int(req.time))
+        #if req.exp:
+        #    extra_query_params['exp'] = str(int(req.exp))
         #if req.get('name') and req.get('sig'):
         #    sig = bfh(req.get('sig'))
-        #    sig = bitnet.base_encode(sig, base=58)
+        #    sig = bitcoin.base_encode(sig, base=58)
         #    extra_query_params['name'] = req['name']
         #    extra_query_params['sig'] = sig
         uri = create_bip21_uri(addr, amount, message, extra_query_params=extra_query_params)
@@ -2164,7 +2175,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         is_lightning = x.is_lightning()
         d = {
             'is_lightning': is_lightning,
-            'amount_BIT': format_satoshis(x.get_amount_sat()),
+            'amount_BTC': format_satoshis(x.get_amount_sat()),
             'message': x.message,
             'timestamp': x.time,
             'expiration': x.exp,
@@ -2205,7 +2216,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         is_lightning = x.is_lightning()
         d = {
             'is_lightning': is_lightning,
-            'amount_BIT': format_satoshis(x.get_amount_sat()),
+            'amount_BTC': format_satoshis(x.get_amount_sat()),
             'message': x.message,
             'timestamp': x.time,
             'expiration': x.exp,
@@ -2264,7 +2275,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         expiration = expiration or 0
         return OnchainInvoice(
             type=PR_TYPE_ONCHAIN,
-            outputs=[(TYPE_ADDRESS, address, amount_sat)],
+            outputs=[PartialTxOutput.from_address_and_value(address, amount_sat)],
             message=message,
             time=timestamp,
             amount_sat=amount_sat,
@@ -2303,7 +2314,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
             assert isinstance(req, OnchainInvoice)
             addr = req.get_address()
             if sanity_checks:
-                if not bitnet.is_address(addr):
+                if not bitcoin.is_address(addr):
                     raise Exception(_('Invalid Bitnet address.'))
                 if not self.is_mine(addr):
                     raise Exception(_('Address not in wallet.'))
@@ -2455,7 +2466,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
         pass
 
     def price_at_timestamp(self, txid, price_func):
-        """Returns fiat price of bitnet at the time tx got confirmed."""
+        """Returns fiat price of bitcoin at the time tx got confirmed."""
         timestamp = self.get_tx_height(txid).timestamp
         return price_func(timestamp if timestamp else time.time())
 
@@ -2579,7 +2590,7 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
                         "if this transaction was maliciously modified before you sign,\n"
                         "you might end up paying a higher mining fee than displayed."))
         # all inputs are segwit
-        # https://lists.linuxfoundation.org/pipermail/bitnet-dev/2017-August/014843.html
+        # https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2017-August/014843.html
         return (_("Warning") + ": "
                 + _("If you received this transaction from an untrusted device, "
                     "do not accept to sign it more than once,\n"
@@ -2602,16 +2613,19 @@ class Abstract_Wallet(AddressSynchronizer, ABC):
                     + _("Try to raise your transaction fee, or use a server with a lower relay fee."))
             short_warning = _("below relay fee") + "!"
             allow_send = False
+# high fee warning here mod
         elif fee_ratio >= FEE_RATIO_HIGH_WARNING:
             long_warning = (
-                    _('Warning') + ': ' + _("The fee for this transaction seems unusually high.")
-                    + f' ({fee_ratio*100:.2f}% of amount)')
-            short_warning = _("high fee ratio") + "!"
+                    _('') + '' + _("")
+#                    + f' ({fee_ratio*100:.2f}% of amount)')
+                    + f'')
+            short_warning = _("") + ""
         elif feerate > FEERATE_WARNING_HIGH_FEE / 1000:
             long_warning = (
-                    _('Warning') + ': ' + _("The fee for this transaction seems unusually high.")
-                    + f' (feerate: {feerate:.2f} sat/byte)')
-            short_warning = _("high fee rate") + "!"
+                    _('') + '' + _("")
+#                    + f' (feerate: {feerate:.2f} radiowaves/byte)')
+                    + f'')
+            short_warning = _("") + ""
         if long_warning is None:
             return None
         else:
@@ -2645,7 +2659,7 @@ class Simple_Wallet(Abstract_Wallet):
             return None
         if txin_type == 'p2wpkh-p2sh':
             pubkey = self.get_public_key(address)
-            return bitnet.p2wpkh_nested_script(pubkey)
+            return bitcoin.p2wpkh_nested_script(pubkey)
         if txin_type == 'address':
             return None
         raise UnknownTxinType(f'unexpected txin_type {txin_type}')
@@ -2712,7 +2726,7 @@ class Imported_Wallet(Simple_Wallet):
         good_addr = []  # type: List[str]
         bad_addr = []  # type: List[Tuple[str, str]]
         for address in addresses:
-            if not bitnet.is_address(address):
+            if not bitcoin.is_address(address):
                 bad_addr.append((address, _('invalid address')))
                 continue
             if self.db.has_imported_address(address):
@@ -2759,9 +2773,9 @@ class Imported_Wallet(Simple_Wallet):
         self.db.remove_imported_address(address)
         if pubkey:
             # delete key iff no other address uses it (e.g. p2pkh and p2wpkh for same key)
-            for txin_type in bitnet.WIF_SCRIPT_TYPES.keys():
+            for txin_type in bitcoin.WIF_SCRIPT_TYPES.keys():
                 try:
-                    addr2 = bitnet.pubkey_to_address(txin_type, pubkey)
+                    addr2 = bitcoin.pubkey_to_address(txin_type, pubkey)
                 except NotImplementedError:
                     pass
                 else:
@@ -2816,7 +2830,7 @@ class Imported_Wallet(Simple_Wallet):
             if txin_type not in ('p2pkh', 'p2wpkh', 'p2wpkh-p2sh'):
                 bad_keys.append((key, _('not implemented type') + f': {txin_type}'))
                 continue
-            addr = bitnet.pubkey_to_address(txin_type, pubkey)
+            addr = bitcoin.pubkey_to_address(txin_type, pubkey)
             good_addr.append(addr)
             self.db.add_imported_address(addr, {'type':txin_type, 'pubkey':pubkey})
             self.add_address(addr)
@@ -2851,7 +2865,7 @@ class Imported_Wallet(Simple_Wallet):
             txin_type = self.get_txin_type(addr)
             if txin_type == 'address':
                 return
-            if addr != bitnet.pubkey_to_address(txin_type, pubkey):
+            if addr != bitcoin.pubkey_to_address(txin_type, pubkey):
                 raise InternalAddressCorruption()
 
     def _add_input_sig_info(self, txin, address, *, only_der_suffix):
@@ -2897,7 +2911,7 @@ class Deterministic_Wallet(Abstract_Wallet):
         ln_xprv = self.db.get('lightning_xprv') or self.db.get('lightning_privkey2')
         # lnworker can only be initialized once receiving addresses are available
         # therefore we instantiate lnworker in DeterministicWallet
-        self.lnworker = LNWallet(self, ln_xprv) if ln_xprv else None
+     #   self.lnworker = LNWallet(self, ln_xprv) if ln_xprv else None
 
     def has_seed(self):
         return self.keystore.has_seed()
@@ -2981,7 +2995,7 @@ class Deterministic_Wallet(Abstract_Wallet):
             path = convert_bip32_path_to_list_of_uint32(path)
         pk, compressed = self.keystore.get_private_key(path, password)
         txin_type = self.get_txin_type()  # assumes no mixed-scripts in wallet
-        return bitnet.serialize_privkey(pk, compressed, txin_type)
+        return bitcoin.serialize_privkey(pk, compressed, txin_type)
 
     def get_public_keys_with_deriv_info(self, address: str):
         der_suffix = self.get_address_index(address)
@@ -3126,7 +3140,7 @@ class Standard_Wallet(Simple_Deterministic_Wallet):
 
     def pubkeys_to_address(self, pubkeys):
         pubkey = pubkeys[0]
-        return bitnet.pubkey_to_address(self.txin_type, pubkey)
+        return bitcoin.pubkey_to_address(self.txin_type, pubkey)
 
 
 class Multisig_Wallet(Deterministic_Wallet):
@@ -3142,7 +3156,7 @@ class Multisig_Wallet(Deterministic_Wallet):
 
     def pubkeys_to_address(self, pubkeys):
         redeem_script = self.pubkeys_to_scriptcode(pubkeys)
-        return bitnet.redeem_script_to_address(self.txin_type, redeem_script)
+        return bitcoin.redeem_script_to_address(self.txin_type, redeem_script)
 
     def pubkeys_to_scriptcode(self, pubkeys: Sequence[str]) -> str:
         return transaction.multisig_script(sorted(pubkeys), self.m)
@@ -3154,7 +3168,7 @@ class Multisig_Wallet(Deterministic_Wallet):
         if txin_type == 'p2sh':
             return scriptcode
         elif txin_type == 'p2wsh-p2sh':
-            return bitnet.p2wsh_nested_script(scriptcode)
+            return bitcoin.p2wsh_nested_script(scriptcode)
         elif txin_type == 'p2wsh':
             return None
         raise UnknownTxinType(f'unexpected txin_type {txin_type}')
@@ -3291,8 +3305,8 @@ def restore_wallet_from_text(text, *, path, config: SimpleConfig,
                              passphrase=None, password=None, encrypt_file=True,
                              gap_limit=None) -> dict:
     """Restore a wallet from text. Text can be a seed phrase, a master
-    public key, a master private key, a list of bitnet addresses
-    or bitnet private keys."""
+    public key, a master private key, a list of bitcoin addresses
+    or bitcoin private keys."""
     storage = WalletStorage(path)
     if storage.file_exists():
         raise Exception("Remove the existing wallet first!")

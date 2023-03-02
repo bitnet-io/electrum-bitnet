@@ -13,13 +13,13 @@ import attr
 from aiorpcx import NetAddress
 
 from .util import bfh, bh2u, inv_dict, UserFacingException
-from .util import list_enabled_bits
+#from .util import list_enabled_bits
 from .crypto import sha256
 from .transaction import (Transaction, PartialTransaction, PartialTxInput, TxOutpoint,
                           PartialTxOutput, opcodes, TxOutput)
 from .ecc import CURVE_ORDER, sig_string_from_der_sig, ECPubkey, string_to_number
-from . import ecc, bitnet, crypto, transaction
-from .bitnet import (push_script, redeem_script_to_address, address_to_script,
+from . import ecc, bitcoin, crypto, transaction
+from .bitcoin import (push_script, redeem_script_to_address, address_to_script,
                       construct_witness, construct_script)
 from . import segwit_addr
 from .i18n import _
@@ -66,7 +66,7 @@ class Keypair(OnlyPubkeyKeypair):
     privkey = attr.ib(type=bytes, converter=hex_to_bytes)
 
 @attr.s
-class Config(StoredObject):
+class ChannelConfig(StoredObject):
     # shared channel config fields
     payment_basepoint = attr.ib(type=OnlyPubkeyKeypair, converter=json_to_keypair)
     multisig_key = attr.ib(type=OnlyPubkeyKeypair, converter=json_to_keypair)
@@ -93,11 +93,19 @@ class Config(StoredObject):
         ):
             if not (len(key.pubkey) == 33 and ecc.ECPubkey.is_pubkey_bytes(key.pubkey)):
                 raise Exception(f"{conf_name}. invalid pubkey in channel config")
+        if funding_sat < MIN_FUNDING_SAT:
+            raise Exception(f"funding_sat too low: {funding_sat} sat < {MIN_FUNDING_SAT}")
+        # MUST set funding_satoshis to less than 2^24 satoshi
+        if funding_sat > LN_MAX_FUNDING_SAT:
+            raise Exception(f"funding_sat too high: {funding_sat} sat > {LN_MAX_FUNDING_SAT}")
+        # MUST set push_msat to equal or less than 1000 * funding_satoshis
+        if not (0 <= self.initial_msat <= 1000 * funding_sat):
+            raise Exception(f"{conf_name}. insane initial_msat={self.initial_msat}. (funding_sat={funding_sat})")
         if self.reserve_sat < self.dust_limit_sat:
             raise Exception(f"{conf_name}. MUST set channel_reserve_satoshis greater than or equal to dust_limit_satoshis")
         # technically this could be using the lower DUST_LIMIT_DEFAULT_SAT_SEGWIT
         # but other implementations are checking against this value too; also let's be conservative
-        if self.dust_limit_sat < bitnet.DUST_LIMIT_DEFAULT_SAT_LEGACY:
+        if self.dust_limit_sat < bitcoin.DUST_LIMIT_DEFAULT_SAT_LEGACY:
             raise Exception(f"{conf_name}. dust limit too low: {self.dust_limit_sat} sat")
         if self.reserve_sat > funding_sat // 100:
             raise Exception(f"{conf_name}. reserve too high: {self.reserve_sat}, funding_sat: {funding_sat}")
@@ -106,7 +114,7 @@ class Config(StoredObject):
         HTLC_MINIMUM_MSAT_MIN = 0  # should be at least 1 really, but apparently some nodes are sending zero...
         if self.htlc_minimum_msat < HTLC_MINIMUM_MSAT_MIN:
             raise Exception(f"{conf_name}. htlc_minimum_msat too low: {self.htlc_minimum_msat} msat < {HTLC_MINIMUM_MSAT_MIN}")
-        if self.max_accepted_htlcs < 1:
+        if self.max_accepted_htlcs < 5:
             raise Exception(f"{conf_name}. max_accepted_htlcs too low: {self.max_accepted_htlcs}")
         if self.max_accepted_htlcs > 483:
             raise Exception(f"{conf_name}. max_accepted_htlcs too high: {self.max_accepted_htlcs}")
@@ -115,9 +123,59 @@ class Config(StoredObject):
         if self.max_htlc_value_in_flight_msat < min(1000 * funding_sat, 100_000_000):
             raise Exception(f"{conf_name}. max_htlc_value_in_flight_msat is too small: {self.max_htlc_value_in_flight_msat}")
 
+    @classmethod
+    def cross_validate_params(
+            cls,
+            *,
+            local_config: 'LocalConfig',
+            remote_config: 'RemoteConfig',
+            funding_sat: int,
+            is_local_initiator: bool,  # whether we are the funder
+            initial_feerate_per_kw: int,
+    ) -> None:
+        # first we validate the configs separately
+        local_config.validate_params(funding_sat=funding_sat)
+        remote_config.validate_params(funding_sat=funding_sat)
+        # now do tests that need access to both configs
+        if is_local_initiator:
+            funder, fundee = LOCAL, REMOTE
+            funder_config, fundee_config = local_config, remote_config
+        else:
+            funder, fundee = REMOTE, LOCAL
+            funder_config, fundee_config = remote_config, local_config
+        # if channel_reserve_satoshis is less than dust_limit_satoshis within the open_channel message:
+        #     MUST reject the channel.
+        if remote_config.reserve_sat < local_config.dust_limit_sat:
+            raise Exception("violated constraint: remote_config.reserve_sat < local_config.dust_limit_sat")
+        # if channel_reserve_satoshis from the open_channel message is less than dust_limit_satoshis:
+        #     MUST reject the channel.
+        if local_config.reserve_sat < remote_config.dust_limit_sat:
+            raise Exception("violated constraint: local_config.reserve_sat < remote_config.dust_limit_sat")
+        # The receiving node MUST fail the channel if:
+        #     the funder's amount for the initial commitment transaction is not
+        #     sufficient for full fee payment.
+        if funder_config.initial_msat < calc_fees_for_commitment_tx(
+                num_htlcs=0,
+                feerate=initial_feerate_per_kw,
+                is_local_initiator=is_local_initiator)[funder]:
+            raise Exception(
+                "the funder's amount for the initial commitment transaction "
+                "is not sufficient for full fee payment")
+        # The receiving node MUST fail the channel if:
+        #     both to_local and to_remote amounts for the initial commitment transaction are
+        #     less than or equal to channel_reserve_satoshis (see BOLT 3).
+        if (max(local_config.initial_msat, remote_config.initial_msat)
+                <= 1000 * max(local_config.reserve_sat, remote_config.reserve_sat)):
+            raise Exception(
+                "both to_local and to_remote amounts for the initial commitment "
+                "transaction are less than or equal to channel_reserve_satoshis")
+        from .simple_config import FEERATE_PER_KW_MIN_RELAY_LIGHTNING
+        if initial_feerate_per_kw < FEERATE_PER_KW_MIN_RELAY_LIGHTNING:
+            raise Exception(f"feerate lower than min relay fee. {initial_feerate_per_kw} sat/kw.")
+
 
 @attr.s
-class LocalConfig(Config):
+class LocalConfig(ChannelConfig):
     channel_seed = attr.ib(type=bytes, converter=hex_to_bytes)  # type: Optional[bytes]
     funding_locked_received = attr.ib(type=bool)
     was_announced = attr.ib(type=bool)
@@ -150,7 +208,7 @@ class LocalConfig(Config):
             raise Exception(f"{conf_name}. htlc_minimum_msat too low: {self.htlc_minimum_msat} msat < {HTLC_MINIMUM_MSAT_MIN}")
 
 @attr.s
-class RemoteConfig(Config):
+class RemoteConfig(ChannelConfig):
     next_per_commitment_point = attr.ib(type=bytes, converter=hex_to_bytes)
     current_per_commitment_point = attr.ib(default=None, type=bytes, converter=hex_to_bytes)
 
@@ -464,7 +522,7 @@ def make_htlc_tx_output(amount_msat, local_feerate, revocationpubkey, local_dela
         opcodes.OP_CHECKSIG,
     ]))
 
-    p2wsh = bitnet.redeem_script_to_address('p2wsh', bh2u(script))
+    p2wsh = bitcoin.redeem_script_to_address('p2wsh', bh2u(script))
     weight = HTLC_SUCCESS_WEIGHT if success else HTLC_TIMEOUT_WEIGHT
     fee = local_feerate * weight
     fee = fee // 1000 * 1000
@@ -510,7 +568,7 @@ def make_offered_htlc(revocation_pubkey: bytes, remote_htlcpubkey: bytes,
     script = bfh(construct_script([
         opcodes.OP_DUP,
         opcodes.OP_HASH160,
-        bitnet.hash_160(revocation_pubkey),
+        bitcoin.hash_160(revocation_pubkey),
         opcodes.OP_EQUAL,
         opcodes.OP_IF,
         opcodes.OP_CHECKSIG,
@@ -546,7 +604,7 @@ def make_received_htlc(revocation_pubkey: bytes, remote_htlcpubkey: bytes,
     script = bfh(construct_script([
         opcodes.OP_DUP,
         opcodes.OP_HASH160,
-        bitnet.hash_160(revocation_pubkey),
+        bitcoin.hash_160(revocation_pubkey),
         opcodes.OP_EQUAL,
         opcodes.OP_IF,
         opcodes.OP_CHECKSIG,
@@ -732,7 +790,7 @@ def make_commitment_outputs(*, fees_per_participant: Mapping[HTLCOwner, int], lo
     non_htlc_outputs = [to_local, to_remote]
     htlc_outputs = []
     for script, htlc in htlcs:
-        addr = bitnet.redeem_script_to_address('p2wsh', bh2u(script))
+        addr = bitcoin.redeem_script_to_address('p2wsh', bh2u(script))
         htlc_outputs.append(PartialTxOutput(scriptpubkey=bfh(address_to_script(addr)),
                                             value=htlc.amount_msat // 1000))
 
@@ -854,10 +912,10 @@ def make_commitment_output_to_local_witness_script(
 def make_commitment_output_to_local_address(
         revocation_pubkey: bytes, to_self_delay: int, delayed_pubkey: bytes) -> str:
     local_script = make_commitment_output_to_local_witness_script(revocation_pubkey, to_self_delay, delayed_pubkey)
-    return bitnet.redeem_script_to_address('p2wsh', bh2u(local_script))
+    return bitcoin.redeem_script_to_address('p2wsh', bh2u(local_script))
 
 def make_commitment_output_to_remote_address(remote_payment_pubkey: bytes) -> str:
-    return bitnet.pubkey_to_address('p2wpkh', bh2u(remote_payment_pubkey))
+    return bitcoin.pubkey_to_address('p2wpkh', bh2u(remote_payment_pubkey))
 
 def sign_and_get_sig_string(tx: PartialTransaction, local_config, remote_config):
     tx.sign({bh2u(local_config.multisig_key.pubkey): (local_config.multisig_key.privkey, True)})

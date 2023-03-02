@@ -27,7 +27,7 @@ from math import floor, log10
 from typing import NamedTuple, List, Callable, Sequence, Union, Dict, Tuple
 from decimal import Decimal
 
-from .bitnet import sha256, COIN, is_address
+from .bitcoin import sha256, COIN, is_address
 from .transaction import Transaction, TxOutput, PartialTransaction, PartialTxInput, PartialTxOutput
 from .util import NotEnoughFunds
 from .logging import Logger
@@ -156,7 +156,7 @@ class CoinChooserBase(Logger):
     def _change_amounts(self, tx: PartialTransaction, count: int, fee_estimator_numchange) -> List[int]:
         # Break change up if bigger than max_change
         output_amounts = [o.value for o in tx.outputs()]
-        # Don't split change of less than 0.02 BIT
+        # Don't split change of less than 0.02 BTC
         max_change = max(max(output_amounts) * 1.25, 0.02 * COIN)
 
         # Use N change outputs
@@ -307,7 +307,7 @@ class CoinChooserBase(Logger):
             total_input = input_value + bucket_value_sum
             if total_input < spent_amount:  # shortcut for performance
                 return False
-            # any bitnet tx must have at least 1 input by consensus
+            # any bitcoin tx must have at least 1 input by consensus
             # (check we add some new UTXOs now or already have some fixed inputs)
             if not buckets and not inputs:
                 return False
@@ -464,12 +464,12 @@ class CoinChooserPrivacy(CoinChooserRandom):
                 pass  # no change is great!
             elif change < min_change:
                 badness += (min_change - change) / (min_change + 10000)
-                # Penalize really small change; under 1 mBIT ~= using 1 more input
+                # Penalize really small change; under 1 mBTC ~= using 1 more input
                 if change < COIN / 1000:
                     badness += 1
             elif change > max_change:
                 badness += (change - max_change) / (max_change + 10000)
-                # Penalize large change; 5 BIT excess ~= using 1 more input
+                # Penalize large change; 5 BTC excess ~= using 1 more input
                 badness += change / (COIN * 5)
             return ScoredCandidate(badness, tx, buckets)
 

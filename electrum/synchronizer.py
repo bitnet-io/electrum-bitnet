@@ -33,7 +33,7 @@ from aiorpcx import TaskGroup, run_in_thread, RPCError
 from . import util
 from .transaction import Transaction, PartialTransaction
 from .util import bh2u, make_aiohttp_session, NetworkJobOnDefaultServer, random_shuffled_copy
-from .bitnet import address_to_scripthash, is_address
+from .bitcoin import address_to_scripthash, is_address
 from .logging import Logger
 from .interface import GracefulDisconnect, NetworkTimeout
 
@@ -94,7 +94,7 @@ class SynchronizerBase(NetworkJobOnDefaultServer):
 
     async def _add_address(self, addr: str):
         # note: this method is async as add_queue.put_nowait is not thread-safe.
-        if not is_address(addr): raise ValueError(f"invalid bitnet address {addr}")
+        if not is_address(addr): raise ValueError(f"invalid bitcoin address {addr}")
         if addr in self.requested_addrs: return
         self.requested_addrs.add(addr)
         self.add_queue.put_nowait(addr)

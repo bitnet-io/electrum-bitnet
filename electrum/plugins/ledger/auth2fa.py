@@ -4,12 +4,12 @@ from typing import TYPE_CHECKING
 from PyQt5.QtWidgets import (QDialog, QLineEdit, QTextEdit, QVBoxLayout, QLabel,
                              QWidget, QHBoxLayout, QComboBox)
 
-from btchip.btchip import BIThipException
+from btchip.btchip import BTChipException
 
 from electrum.gui.qt.util import PasswordLineEdit
 
 from electrum.i18n import _
-from electrum import constants, bitnet
+from electrum import constants, bitcoin
 from electrum.logging import get_logger
 
 if TYPE_CHECKING:
@@ -116,7 +116,7 @@ class LedgerAuthDialog(QDialog):
                     text = addr[:i] + '<u><b>' + addr[i:i+1] + '</u></b>' + addr[i+1:]
                 else:
                     # pin needs to be created from mainnet address
-                    addr_mainnet = bitnet.script_to_address(bitnet.address_to_script(addr), net=constants.BitnetMainnet)
+                    addr_mainnet = bitcoin.script_to_address(bitcoin.address_to_script(addr), net=constants.BitnetMainnet)
                     addr_mainnet = addr_mainnet[:i] + '<u><b>' + addr_mainnet[i:i+1] + '</u></b>' + addr_mainnet[i+1:]
                     text = str(addr) + '\n' + str(addr_mainnet)
                 self.addrtext.setHtml(str(text))
@@ -163,6 +163,6 @@ class LedgerAuthDialog(QDialog):
         try:
             mode = self.dongle.exchange(bytearray(apdu))
             return mode
-        except BIThipException as e:
+        except BTChipException as e:
             _logger.debug('Device getMode Failed')
         return 0x11

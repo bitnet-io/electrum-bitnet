@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
 COINBASE_MATURITY = 100
 COIN = 100000000
-TOTAL_COIN_SUPPLY_LIMIT_IN_BIT = 21000000
+TOTAL_COIN_SUPPLY_LIMIT_IN_BIT = 100000000000
 
 NLOCKTIME_MIN = 0
 NLOCKTIME_BLOCKHEIGHT_MAX = 500_000_000 - 1
@@ -221,7 +221,7 @@ def script_num_to_hex(i: int) -> str:
     """See CScriptNum in Bitnet Core.
     Encodes an integer as hex, to be used in script.
 
-    ported from https://github.com/bitnet/bitnet/blob/8cbc5c4be4be22aca228074f087a374a7ec38be8/src/script/script.h#L326
+    ported from https://github.com/bitcoin/bitcoin/blob/8cbc5c4be4be22aca228074f087a374a7ec38be8/src/script/script.h#L326
     """
     if i == 0:
         return ''
@@ -242,8 +242,8 @@ def script_num_to_hex(i: int) -> str:
 
 
 def var_int(i: int) -> str:
-    # https://en.bitnet.it/wiki/Protocol_specification#Variable_length_integer
-    # https://github.com/bitnet/bitnet/blob/efe1ee0d8d7f82150789f1f6840f139289628a2b/src/serialize.h#L247
+    # https://en.bitcoin.it/wiki/Protocol_specification#Variable_length_integer
+    # https://github.com/bitcoin/bitcoin/blob/efe1ee0d8d7f82150789f1f6840f139289628a2b/src/serialize.h#L247
     # "CompactSize"
     assert i >= 0, i
     if i<0xfd:
@@ -318,7 +318,7 @@ def construct_witness(items: Sequence[Union[str, int, bytes]]) -> str:
 
 
 def construct_script(items: Sequence[Union[str, int, bytes, opcodes]]) -> str:
-    """Constructs bitnet script from given items."""
+    """Constructs bitcoin script from given items."""
     script = ''
     for item in items:
         if isinstance(item, opcodes):
@@ -348,7 +348,7 @@ def relayfee(network: 'Network' = None) -> int:
     return fee
 
 
-# see https://github.com/bitnet/bitnet/blob/a62f0ed64f8bbbdfe6467ac5ce92ef5b5222d1bd/src/policy/policy.cpp#L14
+# see https://github.com/bitcoin/bitcoin/blob/a62f0ed64f8bbbdfe6467ac5ce92ef5b5222d1bd/src/policy/policy.cpp#L14
 DUST_LIMIT_DEFAULT_SAT_LEGACY = 546
 DUST_LIMIT_DEFAULT_SAT_SEGWIT = 294
 
@@ -457,7 +457,7 @@ def script_to_address(script: str, *, net=None) -> str:
 def address_to_script(addr: str, *, net=None) -> str:
     if net is None: net = constants.net
     if not is_address(addr, net=net):
-        raise BitnetException(f"invalid bitnet address: {addr}")
+        raise BitnetException(f"invalid bitcoin address: {addr}")
     witver, witprog = segwit_addr.decode_segwit_address(net.SEGWIT_HRP, addr)
     if witprog is not None:
         if not (0 <= witver <= 16):
@@ -487,7 +487,7 @@ def address_to_hash(addr: str, *, net=None) -> Tuple[OnchainOutputType, bytes]:
     """Return (type, pubkey hash / witness program) for an address."""
     if net is None: net = constants.net
     if not is_address(addr, net=net):
-        raise BitnetException(f"invalid bitnet address: {addr}")
+        raise BitnetException(f"invalid bitcoin address: {addr}")
     witver, witprog = segwit_addr.decode_segwit_address(net.SEGWIT_HRP, addr)
     if witprog is not None:
         if witver != 0:
@@ -760,7 +760,7 @@ def is_minikey(text: str) -> bool:
     # permits any length of 20 or more provided the minikey is valid.
     # A valid minikey must begin with an 'S', be in base58, and when
     # suffixed with '?' have its SHA256 hash begin with a zero byte.
-    # They are widely used in Casascius physical bitnets.
+    # They are widely used in Casascius physical bitcoins.
     return (len(text) >= 20 and text[0] == 'S'
             and all(ord(c) in __b58chars for c in text)
             and sha256(text + '?')[0] == 0x00)

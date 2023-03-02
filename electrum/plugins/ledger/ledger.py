@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 from electrum import ecc
 from electrum import bip32
 from electrum.crypto import hash_160
-from electrum.bitnet import int_to_hex, var_int, is_segwit_script_type, is_b58_address
+from electrum.bitcoin import int_to_hex, var_int, is_segwit_script_type, is_b58_address
 from electrum.bip32 import BIP32Node, convert_bip32_intpath_to_strpath
 from electrum.i18n import _
 from electrum.keystore import Hardware_KeyStore
@@ -30,15 +30,15 @@ try:
     from btchip.btchipComm import HIDDongleHIDAPI, DongleWait
     from btchip.btchip import btchip
     from btchip.btchipUtils import compress_public_key,format_transaction, get_regular_input_script, get_p2sh_input_script
-    from btchip.bitnetTransaction import bitnetTransaction
+    from btchip.bitcoinTransaction import bitcoinTransaction
     from btchip.btchipFirmwareWizard import checkFirmware, updateFirmware
-    from btchip.btchipException import BIThipException
-    BITHIP = True
-    BITHIP_DEBUG = False
+    from btchip.btchipException import BTChipException
+    BTCHIP = True
+    BTCHIP_DEBUG = False
 except ImportError as e:
     if not (isinstance(e, ModuleNotFoundError) and e.name == 'btchip'):
         _logger.exception('error importing ledger plugin deps')
-    BITHIP = False
+    BTCHIP = False
 
 MSG_NEEDS_FW_UPDATE_GENERIC = _('Firmware version too old. Please update at') + \
                       ' https://www.ledgerwallet.com'
@@ -57,7 +57,7 @@ def test_pin_unlocked(func):
     def catch_exception(self, *args, **kwargs):
         try:
             return func(self, *args, **kwargs)
-        except BIThipException as e:
+        except BTChipException as e:
             if e.sw == 0x6982:
                 raise UserFacingException(_('Your Ledger is locked. Please unlock it.'))
             else:
@@ -147,7 +147,7 @@ class Ledger_Client(HardwareClientBase):
         try:
             client.getVerifyPinRemainingAttempts()
             return True
-        except BIThipException as e:
+        except BTChipException as e:
             if e.sw == 0x6d00:
                 return False
             raise e
@@ -156,7 +156,7 @@ class Ledger_Client(HardwareClientBase):
         try:
             # Invalid SET OPERATION MODE to verify the PIN status
             client.dongle.exchange(bytearray([0xe0, 0x26, 0x00, 0x00, 0x01, 0xAB]))
-        except BIThipException as e:
+        except BTChipException as e:
             if (e.sw == 0x6982):
                 return False
             if (e.sw == 0x6A80):
@@ -190,7 +190,7 @@ class Ledger_Client(HardwareClientBase):
                 raise UserFacingException(MSG_NEEDS_FW_UPDATE_GENERIC)
             try:
                 self.dongleObject.getOperationMode()
-            except BIThipException as e:
+            except BTChipException as e:
                 if (e.sw == 0x6985):
                     self.close()
                     self.handler.get_setup()
@@ -209,7 +209,7 @@ class Ledger_Client(HardwareClientBase):
                     raise UserFacingException('Aborted by user - please unplug the dongle and plug it again before retrying')
                 pin = pin.encode()
                 self.dongleObject.verifyPin(pin)
-        except BIThipException as e:
+        except BTChipException as e:
             if (e.sw == 0x6faa):
                 raise UserFacingException("Dongle is temporarily locked - please unplug it and replug it again")
             if ((e.sw & 0xFFF0) == 0x63c0):
@@ -225,7 +225,7 @@ class Ledger_Client(HardwareClientBase):
         if not self.preflightDone:
             try:
                 self.perform_hw1_preflight()
-            except BIThipException as e:
+            except BTChipException as e:
                 if (e.sw == 0x6d00 or e.sw == 0x6700):
                     raise UserFacingException(_("Device not in Bitnet mode")) from e
                 raise e
@@ -308,7 +308,7 @@ class Ledger_KeyStore(Hardware_KeyStore):
                     raise UserWarning(_('Cancelled by user'))
                 pin = str(pin).encode()
             signature = client_ledger.signMessageSign(pin)
-        except BIThipException as e:
+        except BTChipException as e:
             if e.sw == 0x6a80:
                 self.give_error("Unfortunately, this message cannot be signed by the Ledger wallet. Only alphanumerical messages shorter than 140 characters are supported. Please remove any extra characters (tab, carriage return) and retry.")
             elif e.sw == 0x6985:  # cancelled by user
@@ -456,7 +456,7 @@ class Ledger_KeyStore(Hardware_KeyStore):
                     chipInputs.append({'value' : tmp, 'witness' : True, 'sequence' : sequence})
                     redeemScripts.append(bfh(utxo[2]))
                 elif (not p2shTransaction) or client_electrum.supports_multi_output():
-                    txtmp = bitnetTransaction(bfh(utxo[0]))
+                    txtmp = bitcoinTransaction(bfh(utxo[0]))
                     trustedInput = client_ledger.getTrustedInput(txtmp, utxo[1])
                     trustedInput['sequence'] = sequence
                     if segwitTransaction:
@@ -532,7 +532,7 @@ class Ledger_KeyStore(Hardware_KeyStore):
         except UserWarning:
             self.handler.show_error(_('Cancelled by user'))
             return
-        except BIThipException as e:
+        except BTChipException as e:
             if e.sw in (0x6985, 0x6d00):  # cancelled by user
                 return
             elif e.sw == 0x6982:
@@ -557,7 +557,7 @@ class Ledger_KeyStore(Hardware_KeyStore):
         segwitNative = txin_type == 'p2wpkh'
         try:
             client.getWalletPublicKey(address_path, showOnScreen=True, segwit=segwit, segwitNative=segwitNative)
-        except BIThipException as e:
+        except BTChipException as e:
             if e.sw == 0x6985:  # cancelled by user
                 pass
             elif e.sw == 0x6982:
@@ -621,7 +621,7 @@ class LedgerPlugin(HW_PluginBase):
             raise
         except:
             version = "unknown"
-        if BITHIP:
+        if BTCHIP:
             return version
         else:
             raise LibraryFoundButUnusable(library_version=version)
@@ -678,7 +678,7 @@ class LedgerPlugin(HW_PluginBase):
         dev = hid.device()
         dev.open_path(device.path)
         dev.set_nonblocking(True)
-        return HIDDongleHIDAPI(dev, ledger, BITHIP_DEBUG)
+        return HIDDongleHIDAPI(dev, ledger, BTCHIP_DEBUG)
 
     @runs_in_hwd_thread
     def create_client(self, device, handler):

@@ -25,7 +25,7 @@
 
 '''RPC message framing in a byte stream.'''
 
-__all__ = ('FramerBase', 'NewlineFramer', 'BinaryFramer', 'BitnetFramer',
+__all__ = ('FramerBase', 'NewlineFramer', 'BinaryFramer', 'BitcoinFramer',
            'OversizedPayloadError', 'BadChecksumError', 'BadMagicError', )
 
 from hashlib import sha256 as _sha256
@@ -192,7 +192,7 @@ def sha256(x):
 
 
 def double_sha256(x):
-    '''SHA-256 of SHA-256, as used extensively in bitnet.'''
+    '''SHA-256 of SHA-256, as used extensively in bitcoin.'''
     return sha256(sha256(x))
 
 
@@ -212,9 +212,9 @@ BITCOIN_MAGIC = bytes.fromhex('e3e1f3e8')
 MAX_BLOCK_SIZE = 128_000_000
 
 
-class BitnetFramer(BinaryFramer):
+class BitcoinFramer(BinaryFramer):
     '''Provides a framer of binary message payloads in the style of the
-    Bitnet network protocol.
+    Bitcoin network protocol.
 
     Each binary message has the following elements, in order:
 

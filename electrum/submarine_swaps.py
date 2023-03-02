@@ -9,15 +9,15 @@ import attr
 
 from .crypto import sha256, hash_160
 from .ecc import ECPrivkey
-from .bitnet import (script_to_p2wsh, opcodes, p2wsh_nested_script, push_script,
+from .bitcoin import (script_to_p2wsh, opcodes, p2wsh_nested_script, push_script,
                       is_segwit_address, construct_witness)
 from .transaction import PartialTxInput, PartialTxOutput, PartialTransaction
 from .transaction import script_GetOp, match_script_against_template, OPPushDataGeneric, OPPushDataPubkey
 from .util import log_exceptions
-from .lnutil import REDEEM_AFTER_DOUBLE_SPENT_DELAY, ln_dummy_address
-from .bitnet import dust_threshold
+#from .lnutil import REDEEM_AFTER_DOUBLE_SPENT_DELAY, ln_dummy_address
+from .bitcoin import dust_threshold
 from .logging import Logger
-from .lnutil import hex_to_bytes
+#from .lnutil import hex_to_bytes
 from .json_db import StoredObject
 from . import constants
 
@@ -84,7 +84,7 @@ class SwapData(StoredObject):
     locktime = attr.ib(type=int)
     onchain_amount = attr.ib(type=int)  # in sats
     lightning_amount = attr.ib(type=int)  # in sats
-    redeem_script = attr.ib(type=bytes, converter=hex_to_bytes)
+#    redeem_script = attr.ib(type=bytes, converter=hex_to_bytes)
     preimage = attr.ib(type=bytes, converter=hex_to_bytes)
     prepay_hash = attr.ib(type=Optional[bytes], converter=hex_to_bytes)
     privkey = attr.ib(type=bytes, converter=hex_to_bytes)
@@ -242,7 +242,7 @@ class SwapManager(Logger):
             password,
             tx: PartialTransaction = None,
     ) -> str:
-        """send on-chain BIT, receive on Lightning
+        """send on-chain BTC, receive on Lightning
 
         - User generates an LN invoice with RHASH, and knows preimage.
         - User creates on-chain output locked to RHASH.
@@ -262,7 +262,7 @@ class SwapManager(Logger):
         preimage = self.lnworker.get_preimage(payment_hash)
         request_data = {
             "type": "submarine",
-            "pairId": "BIT/BIT",
+            "pairId": "BTC/BTC",
             "orderSide": "sell",
             "invoice": invoice,
             "refundPublicKey": pubkey.hex()
@@ -354,7 +354,7 @@ class SwapManager(Logger):
         preimage_hash = sha256(preimage)
         request_data = {
             "type": "reversesubmarine",
-            "pairId": "BIT/BIT",
+            "pairId": "BTC/BTC",
             "orderSide": "buy",
             "invoiceAmount": lightning_amount_sat,
             "preimageHash": preimage_hash.hex(),
@@ -441,11 +441,11 @@ class SwapManager(Logger):
             self.api_url + '/getpairs',
             timeout=30)
         pairs = json.loads(response)
-        fees = pairs['pairs']['BIT/BIT']['fees']
+        fees = pairs['pairs']['BTC/BTC']['fees']
         self.percentage = fees['percentage']
         self.normal_fee = fees['minerFees']['baseAsset']['normal']
         self.lockup_fee = fees['minerFees']['baseAsset']['reverse']['lockup']
-        limits = pairs['pairs']['BIT/BIT']['limits']
+        limits = pairs['pairs']['BTC/BTC']['limits']
         self.min_amount = limits['minimal']
         self._max_amount = limits['maximal']
 

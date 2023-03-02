@@ -26,7 +26,7 @@ Spending transactions can be saved to MicroSD using by exporting them
 from transaction preview dialog (when this plugin is
 owner of the wallet). That PSBT is then signed on the Coldcard
 (again using MicroSD both ways). The result is a ready-to-transmit
-bitnet transaction, which can be transmitted using Tools > Load
+bitcoin transaction, which can be transmitted using Tools > Load
 Transaction > From File in Electrum or really any tool.
 
 <https://coldcardwallet.com>

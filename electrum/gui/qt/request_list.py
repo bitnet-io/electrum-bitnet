@@ -161,7 +161,7 @@ class RequestList(MyTreeView):
                 icon = read_QIcon("lightning.png")
                 tooltip = 'lightning request'
             else:
-                icon = read_QIcon("bitnet.png")
+                icon = read_QIcon("bitcoin.png")
                 tooltip = 'onchain request'
             items = [QStandardItem(e) for e in labels]
             self.set_editability(items)
