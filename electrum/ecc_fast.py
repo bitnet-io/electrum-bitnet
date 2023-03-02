@@ -38,18 +38,16 @@ class LibModuleMissing(Exception): pass
 
 def load_library():
     if sys.platform == 'darwin':
-        libnames = ['libsecp256k1.1.dylib', 'libsecp256k1.0.dylib', ]
+        library_paths = (os.path.join(os.path.dirname(__file__), 'libsecp256k1.0.dylib'),
+                         'libsecp256k1.0.dylib')
     elif sys.platform in ('windows', 'win32'):
-        libnames = ['libsecp256k1-1.dll', 'libsecp256k1-0.dll', ]
+        library_paths = (os.path.join(os.path.dirname(__file__), 'libsecp256k1-0.dll'),
+                         'libsecp256k1-0.dll')
     elif 'ANDROID_DATA' in os.environ:
-        libnames = ['libsecp256k1.so', ]
+        library_paths = ('libsecp256k1.so',)
     else:  # desktop Linux and similar
-        libnames = ['libsecp256k1.so.1', 'libsecp256k1.so.0', ]
-    library_paths = []
-    for libname in libnames:  # try local files in repo dir first
-        library_paths.append(os.path.join(os.path.dirname(__file__), libname))
-    for libname in libnames:
-        library_paths.append(libname)
+        library_paths = (os.path.join(os.path.dirname(__file__), 'libsecp256k1.so.0'),
+                         'libsecp256k1.so.0')
 
     exceptions = []
     secp256k1 = None
@@ -140,9 +138,3 @@ except BaseException as e:
 if _libsecp256k1 is None:
     # hard fail:
     sys.exit(f"Error: Failed to load libsecp256k1.")
-
-
-def version_info() -> dict:
-    return {
-        "libsecp256k1.path": _libsecp256k1._name if _libsecp256k1 else None,
-    }

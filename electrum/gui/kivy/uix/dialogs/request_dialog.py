@@ -5,12 +5,10 @@ from kivy.lang import Builder
 from kivy.core.clipboard import Clipboard
 from kivy.app import App
 from kivy.clock import Clock
-from kivy.properties import NumericProperty, StringProperty, BooleanProperty
-from kivy.uix.tabbedpanel import TabbedPanel
 
 from electrum.gui.kivy.i18n import _
 from electrum.invoices import pr_tooltips, pr_color
-from electrum.invoices import PR_UNKNOWN, PR_UNPAID, PR_FAILED
+from electrum.invoices import PR_UNKNOWN, PR_UNPAID, PR_FAILED, PR_TYPE_LN
 
 if TYPE_CHECKING:
     from ...main_window import ElectrumWindow
@@ -19,25 +17,18 @@ if TYPE_CHECKING:
 Builder.load_string('''
 #:import KIVY_GUI_PATH electrum.gui.kivy.KIVY_GUI_PATH
 
-<TabbedPanelWithHiddenHeader@TabbedPanel>:
-    tab_height: "0dp"
-    tab_width: "1dp"
-
 <RequestDialog@Popup>
     id: popup
     amount_str: ''
     title: ''
     description:''
-    mode:0
+    is_lightning: False
     key:''
-    data:''
     warning: ''
-    error_text: ''
     status_str: ''
     status_color: 1,1,1,1
     shaded: False
     show_text: False
-    has_lightning: False
     AnchorLayout:
         anchor_x: 'center'
         BoxLayout:
@@ -45,54 +36,22 @@ Builder.load_string('''
             size_hint: 1, 1
             padding: '10dp'
             spacing: '10dp'
-            TabbedPanelWithHiddenHeader:
-                id: qrdata_tabs
-                do_default_tab: False
+            QRCodeWidget:
+                id: qr
+                shaded: False
+                foreground_color: (0, 0, 0, 0.5) if self.shaded else (0, 0, 0, 0)
                 on_touch_down:
-                    root.show_text = True if root.error_text else not root.show_text
-                TabbedPanelItem:
-                    id: qrdata_tab_qr
-                    border: 0,0,0,0  # to hide visual artifact around hidden tab header
-                    QRCodeWidget:
-                        id: qr
-                TabbedPanelItem:
-                    id: qrdata_tab_text
-                    border: 0,0,0,0  # to hide visual artifact around hidden tab header
-                    BoxLayout:
-                        padding: '20dp'
-                        TopLabel:
-                            text: root.error_text if root.error_text else root.data
-                            pos_hint: {'center_x': .5, 'center_y': .5}
-                            halign: "center"
-            BoxLayout:
-                size_hint: 1, None
-                height: '48dp'
-                ToggleButton:
-                    id: b0
-                    group:'g'
-                    size_hint: 1, None
-                    height: '48dp'
-                    text: _('Address')
-                    on_release: self.state = 'down'; root.mode = root.MODE_ADDRESS
-                ToggleButton:
-                    id: b1
-                    group:'g'
-                    size_hint: 1, None
-                    height: '48dp'
-                    text: _('URI')
-                    on_release: self.state = 'down'; root.mode = root.MODE_URI
-                ToggleButton:
-                    id: b2
-                    group:'g'
-                    size_hint: 1, None
-                    height: '48dp'
-                    text: _('Lightning')
-                    on_release: self.state = 'down'; root.mode = root.MODE_LIGHTNING
-                    disabled: not root.has_lightning
+                    touch = args[1]
+                    if self.collide_point(*touch.pos): self.shaded = not self.shaded
             TopLabel:
                 text: _('Description') + ': ' + root.description or _('None')
             TopLabel:
                 text: _('Amount') + ': ' + root.amount_str
+            TopLabel:
+                text: (_('Address') if not root.is_lightning else _('Payment hash')) + ': '
+            RefLabel:
+                data: root.key
+                name: (_('Address') if not root.is_lightning else _('Payment hash'))
             TopLabel:
                 text: _('Status') + ': ' + root.status_str
                 color: root.status_color
@@ -126,22 +85,7 @@ Builder.load_string('''
                     on_release: popup.dismiss()
 ''')
 
-
-class TabbedPanelWithHiddenHeader(TabbedPanel):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._tab_strip.opacity = 0
-
-
 class RequestDialog(Factory.Popup):
-
-    MODE_ADDRESS = 0
-    MODE_URI = 1
-    MODE_LIGHTNING = 2
-
-    mode = NumericProperty(0)
-    data = StringProperty('')
-    show_text = BooleanProperty(False)
 
     def __init__(self, title, key):
         self.status = PR_UNKNOWN
@@ -150,73 +94,33 @@ class RequestDialog(Factory.Popup):
         self.title = title
         self.key = key
         r = self.app.wallet.get_request(key)
+        self.is_lightning = r.is_lightning()
+        self.data = r.invoice if self.is_lightning else self.app.wallet.get_request_URI(r)
         self.amount_sat = r.get_amount_sat()
         self.amount_str = self.app.format_amount_and_units(self.amount_sat)
         self.description = r.message
-        if not self.app.wallet.get_request_URI(r) and r.is_lightning():
-            self.mode = self.MODE_LIGHTNING
-            self.ids.b2.state = 'down'  # FIXME magic number b2
-        else:
-            self.mode = self.MODE_URI
-            self.ids.b1.state = 'down'  # FIXME magic number b1
-        self.on_mode(0, 0)
-        self.ids.b0.pressed = True
         self.update_status()
 
-    def on_mode(self, instance, x):
-        self.update_status()
-        qr_data = self.data
-        if self.mode == self.MODE_LIGHTNING:
+    def on_open(self):
+        data = self.data
+        if self.is_lightning:
             # encode lightning invoices as uppercase so QR encoding can use
             # alphanumeric mode; resulting in smaller QR codes
-            qr_data = qr_data.upper()
-        if qr_data:
-            self.ids.qr.set_data(qr_data)
-        if not qr_data and self.error_text:
-            self.show_text = True
-        else:
-            self.show_text = False
-
-    def on_show_text(self, instance, b):
-        tab = self.ids.qrdata_tab_text if self.show_text else self.ids.qrdata_tab_qr
-        Clock.schedule_once(lambda dt: self.ids.qrdata_tabs.switch_to(tab))
+            data = data.upper()
+        self.ids.qr.set_data(data)
 
     def update_status(self):
         req = self.app.wallet.get_request(self.key)
-        help_texts = self.app.wallet.get_help_texts_for_receive_request(req)
-        address = req.get_address() or ''
-        URI = self.app.wallet.get_request_URI(req) or ''
-        lnaddr = req.lightning_invoice or ''
-        self.status = self.app.wallet.get_invoice_status(req)
+        self.status = self.app.wallet.get_request_status(self.key)
         self.status_str = req.get_status_str(self.status)
         self.status_color = pr_color[self.status]
-        self.has_lightning = req.is_lightning()
-
-        warning = ''
-        error_text = ''
-        self.data = ''
-        if self.mode == self.MODE_ADDRESS:
-            if help_texts.address_is_error:
-                error_text = help_texts.address_help
-            else:
-                self.data = address
-                warning = help_texts.address_help
-        elif self.mode == self.MODE_URI:
-            if help_texts.URI_is_error:
-                error_text = help_texts.URI_help
-            else:
-                self.data = URI
-                warning = help_texts.URI_help
-        elif self.mode == self.MODE_LIGHTNING:
-            if help_texts.ln_is_error:
-                error_text = help_texts.ln_help
-            else:
-                self.data = lnaddr
-                warning = help_texts.ln_help
-        else:
-            raise Exception(f"unexpected {self.mode=!r}")
-        self.warning = (_('Warning') + ': ' + warning) if warning else ''
-        self.error_text = error_text
+        if self.status == PR_UNPAID and self.is_lightning and self.app.wallet.lnworker:
+            if self.amount_sat and self.amount_sat > self.app.wallet.lnworker.num_sats_can_receive():
+                self.warning = _('Warning') + ': ' + _('This amount exceeds the maximum you can currently receive with your channels')
+        if self.status == PR_UNPAID and not self.is_lightning:
+            address = req.get_address()
+            if self.app.wallet.is_used(address):
+                self.warning = _('Warning') + ': ' + _('This address is being reused')
 
     def on_dismiss(self):
         self.app.request_popup = None
@@ -227,7 +131,7 @@ class RequestDialog(Factory.Popup):
         Clock.schedule_once(lambda dt: self.app.show_info(msg))
 
     def do_share(self):
-        self.app.do_share(self.data, _("Share Bitcoin Request"))
+        self.app.do_share(self.data, _("Share Bitnet Request"))
         self.dismiss()
 
     def delete_dialog(self):

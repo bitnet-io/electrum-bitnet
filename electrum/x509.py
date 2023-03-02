@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2014 Thomas Voegtlin
 #
 # Permission is hereby granted, free of charge, to any person
@@ -28,7 +28,7 @@ import time
 from datetime import datetime
 
 from . import util
-from .util import profiler
+from .util import profiler, bh2u
 from .logging import get_logger
 
 
@@ -272,10 +272,10 @@ class X509(object):
                     # Subject Key Identifier
                     r = value.root()
                     value = value.get_value_of_type(r, 'OCTET STRING')
-                    self.SKI = value.hex()
+                    self.SKI = bh2u(value)
                 elif oid == '2.5.29.35':
                     # Authority Key Identifier
-                    self.AKI = value.get_sequence()[0].hex()
+                    self.AKI = bh2u(value.get_sequence()[0])
                 else:
                     pass
 

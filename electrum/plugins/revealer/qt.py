@@ -330,7 +330,7 @@ class Plugin(RevealerPlugin):
 
         painter.end()
         img = bitmap.toImage()
-        if not self.rawnoise:
+        if (self.rawnoise == False):
             self.make_rawnoise()
 
         self.make_cypherseed(img, self.rawnoise, False, is_seed)

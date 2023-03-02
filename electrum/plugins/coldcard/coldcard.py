@@ -14,7 +14,7 @@ from electrum.plugin import Device, hook, runs_in_hwd_thread
 from electrum.keystore import Hardware_KeyStore, KeyStoreWithMPK
 from electrum.transaction import PartialTransaction
 from electrum.wallet import Standard_Wallet, Multisig_Wallet, Abstract_Wallet
-from electrum.util import bfh, versiontuple, UserFacingException
+from electrum.util import bfh, bh2u, versiontuple, UserFacingException
 from electrum.base_wizard import ScriptTypeNotSupported
 from electrum.logging import get_logger
 
@@ -43,7 +43,11 @@ try:
             # verify a signature (65 bytes) over the session key, using the master bip32 node
             # - customized to use specific EC library of Electrum.
             pubkey = BIP32Node.from_xkey(expect_xpub).eckey
-            return pubkey.verify_message_hash(sig[1:65], self.session_key)
+            try:
+                pubkey.verify_message_hash(sig[1:65], self.session_key)
+                return True
+            except:
+                return False
 
 except ImportError as e:
     if not (isinstance(e, ModuleNotFoundError) and e.name == 'ckcc'):
@@ -228,7 +232,7 @@ class CKCCClient(HardwareClientBase):
         resp = self.dev.send_recv(CCProtocolPacker.sign_transaction(dlen, chk, finalize=finalize),
                                     timeout=None)
 
-        if resp is not None:
+        if resp != None:
             raise ValueError(resp)
 
     @runs_in_hwd_thread
@@ -241,7 +245,7 @@ class CKCCClient(HardwareClientBase):
         # get a file
         return self.dev.download_file(length, checksum, file_number=file_number)
 
-
+        
 
 class Coldcard_KeyStore(Hardware_KeyStore):
     hw_type = 'coldcard'
@@ -251,6 +255,10 @@ class Coldcard_KeyStore(Hardware_KeyStore):
 
     def __init__(self, d):
         Hardware_KeyStore.__init__(self, d)
+        # Errors and other user interaction is done through the wallet's
+        # handler.  The handler is per-window and preserved across
+        # device reconnects
+        self.force_watching_only = False
         self.ux_busy = False
 
         # we need to know at least the fingerprint of the master xpub to verify against MiTM
@@ -269,23 +277,25 @@ class Coldcard_KeyStore(Hardware_KeyStore):
         assert xfp is not None
         return xfp_int_from_xfp_bytes(bfh(xfp))
 
-    def get_client(self, *args, **kwargs):
+    def get_client(self):
         # called when user tries to do something like view address, sign somthing.
         # - not called during probing/setup
         # - will fail if indicated device can't produce the xpub (at derivation) expected
-        client = super().get_client(*args, **kwargs)  # type: Optional[CKCCClient]
-        if client:
+        rv = self.plugin.get_client(self)
+        if rv:
             xfp_int = self.get_xfp_int()
-            client.verify_connection(xfp_int, self.ckcc_xpub)
+            rv.verify_connection(xfp_int, self.ckcc_xpub)
 
-        return client
+        return rv
 
-    def give_error(self, message):
+    def give_error(self, message, clear_client=False):
         self.logger.info(message)
         if not self.ux_busy:
             self.handler.show_error(message)
         else:
             self.ux_busy = False
+        if clear_client:
+            self.client = None
         raise UserFacingException(message)
 
     def wrap_busy(func):
@@ -302,7 +312,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
         raise UserFacingException(_('Encryption and decryption are currently not supported for {}').format(self.device))
 
     @wrap_busy
-    def sign_message(self, sequence, message, password, *, script_type=None):
+    def sign_message(self, sequence, message, password):
         # Sign a message on device. Since we have big screen, of course we
         # have to show the message unabiguously there first!
         try:
@@ -311,7 +321,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
         except (UnicodeError, AssertionError):
             # there are other restrictions on message content,
             # but let the device enforce and report those
-            self.handler.show_error('Only short (%d max) ASCII messages can be signed.'
+            self.handler.show_error('Only short (%d max) ASCII messages can be signed.' 
                                             % MSG_SIGNING_MAX_LENGTH)
             return b''
 
@@ -337,7 +347,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
             assert len(resp) == 2
             addr, raw_sig = resp
 
-            # already encoded in Bitcoin fashion, binary.
+            # already encoded in Bitnet fashion, binary.
             assert 40 < len(raw_sig) <= 65
 
             return raw_sig
@@ -349,7 +359,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
             self.handler.show_error('{}\n\n{}'.format(
                 _('Error showing address') + ':', str(exc)))
         except Exception as e:
-            self.give_error(e)
+            self.give_error(e, True)
 
         # give empty bytes for error cases; it seems to clear the old signature box
         return b''
@@ -382,7 +392,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
                         break
 
                 rlen, rsha = resp
-
+            
                 # download the resulting txn.
                 raw_resp = client.download_file(rlen, rsha)
 
@@ -395,7 +405,7 @@ class Coldcard_KeyStore(Hardware_KeyStore):
             return
         except BaseException as e:
             self.logger.exception('')
-            self.give_error(e)
+            self.give_error(e, True)
             return
 
         tx2 = PartialTransaction.from_raw_psbt(raw_resp)
@@ -507,6 +517,9 @@ class ColdcardPlugin(HW_PluginBase):
 
     @runs_in_hwd_thread
     def create_client(self, device, handler):
+        if handler:
+            self.handler = handler
+
         # We are given a HID device, or at least some details about it.
         # Not sure why not we aren't just given a HID library handle, but
         # the 'path' is unabiguous, so we'll use that.

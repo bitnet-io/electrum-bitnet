@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2012 thomasv@gitorious
 #
 # Permission is hereby granted, free of charge, to any person
@@ -30,11 +30,6 @@ LOCALE_DIR = os.path.join(os.path.dirname(__file__), 'locale')
 language = gettext.translation('electrum', LOCALE_DIR, fallback=True)
 
 
-# note: do not use old-style (%) formatting inside translations,
-#       as syntactically incorrectly translated strings would raise exceptions (see #3237).
-#       e.g. consider  _("Connected to %d nodes.") % n
-#                      >>> "Connecté aux noeuds" % n
-#                      TypeError: not all arguments converted during string formatting
 # note: f-strings cannot be translated! see https://stackoverflow.com/q/49797658
 #       So this does not work:   _(f"My name: {name}")
 #       instead use .format:     _("My name: {}").format(name)
@@ -74,7 +69,7 @@ languages = {
     'nb_NO': _('Norwegian Bokmal'),
     'nl_NL': _('Dutch'),
     'pl_PL': _('Polish'),
-    'pt_BR': _('Portuguese (Brazil)'),
+    'pt_BR': _('Brasilian'),
     'pt_PT': _('Portuguese'),
     'ro_RO': _('Romanian'),
     'ru_RU': _('Russian'),
@@ -89,4 +84,3 @@ languages = {
     'zh_CN': _('Chinese Simplified'),
     'zh_TW': _('Chinese Traditional')
 }
-assert '' in languages

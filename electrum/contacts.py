@@ -1,4 +1,4 @@
-# Electrum - Lightweight Bitcoin Client
+# Electrum - Lightweight Bitnet Client
 # Copyright (c) 2015 Thomas Voegtlin
 #
 # Permission is hereby granted, free of charge, to any person
@@ -21,17 +21,15 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 import re
-from typing import Optional, Tuple
 
 import dns
-import threading
 from dns.exception import DNSException
 
-from . import bitcoin
+from . import bitnet
 from . import dnssec
 from .util import read_json_file, write_json_file, to_string
 from .logging import Logger
-from .util import trigger_callback
+
 
 class Contacts(dict, Logger):
 
@@ -46,7 +44,7 @@ class Contacts(dict, Logger):
         # backward compatibility
         for k, v in self.items():
             _type, n = v
-            if _type == 'address' and bitcoin.is_address(n):
+            if _type == 'address' and bitnet.is_address(n):
                 self.pop(k)
                 self[n] = ('address', k)
 
@@ -73,7 +71,7 @@ class Contacts(dict, Logger):
             return res
 
     def resolve(self, k):
-        if bitcoin.is_address(k):
+        if bitnet.is_address(k):
             return {
                 'address': k,
                 'type': 'address'
@@ -94,21 +92,9 @@ class Contacts(dict, Logger):
                 'type': 'openalias',
                 'validated': validated
             }
-        raise Exception("Invalid Bitcoin address or alias", k)
+        raise Exception("Invalid Bitnet address or alias", k)
 
-    def fetch_openalias(self, config):
-        self.alias_info = None
-        alias = config.get('alias')
-        if alias:
-            alias = str(alias)
-            def f():
-                self.alias_info = self.resolve_openalias(alias)
-                trigger_callback('alias_received')
-            t = threading.Thread(target=f)
-            t.daemon = True
-            t.start()
-
-    def resolve_openalias(self, url: str) -> Optional[Tuple[str, str, bool]]:
+    def resolve_openalias(self, url):
         # support email-style addresses, per the OA standard
         url = url.replace('@', '.')
         try:
@@ -134,12 +120,12 @@ class Contacts(dict, Logger):
             return regex.search(haystack).groups()[0]
         except AttributeError:
             return None
-
+            
     def _validate(self, data):
         for k, v in list(data.items()):
             if k == 'contacts':
                 return self._validate(v)
-            if not bitcoin.is_address(k):
+            if not bitnet.is_address(k):
                 data.pop(k)
             else:
                 _type, _ = v

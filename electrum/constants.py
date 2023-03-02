@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2018 The Electrum developers
 #
 # Permission is hereby granted, free of charge, to any person
@@ -65,22 +65,22 @@ class AbstractNet:
 
     @classmethod
     def rev_genesis_bytes(cls) -> bytes:
-        return bytes.fromhex(bitcoin.rev_hex(cls.GENESIS))
+        return bytes.fromhex(bitnet.rev_hex(cls.GENESIS))
 
 
-class BitcoinMainnet(AbstractNet):
+class BitnetMainnet(AbstractNet):
 
     NET_NAME = "mainnet"
     TESTNET = False
-    WIF_PREFIX = 0x80
-    ADDRTYPE_P2PKH = 0
-    ADDRTYPE_P2SH = 5
-    SEGWIT_HRP = "bc"
+    WIF_PREFIX = 0x9e
+    ADDRTYPE_P2PKH = 25
+    ADDRTYPE_P2SH = 22
+    SEGWIT_HRP = "bit"
     BOLT11_HRP = SEGWIT_HRP
-    GENESIS = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
+    GENESIS = "00000caff19214512f927af2b7cead4b33a54c096e432a275628cb4cf8d4b73c"
     DEFAULT_PORTS = {'t': '50001', 's': '50002'}
     DEFAULT_SERVERS = read_json('servers.json', {})
-    CHECKPOINTS = read_json('checkpoints.json', [])
+    CHECKPOINTS = read_json('', [])
     BLOCK_HEIGHT_FIRST_LIGHTNING_CHANNELS = 497000
 
     XPRV_HEADERS = {
@@ -101,14 +101,14 @@ class BitcoinMainnet(AbstractNet):
     XPUB_HEADERS_INV = inv_dict(XPUB_HEADERS)
     BIP44_COIN_TYPE = 0
     LN_REALM_BYTE = 0
-    LN_DNS_SEEDS = [
-        'nodes.lightning.directory.',
-        'lseed.bitcoinstats.com.',
-        'lseed.darosior.ninja',
-    ]
+  #  LN_DNS_SEEDS = [
+  #      'nodes.lightning.directory.',
+  #      'lseed.bitnetstats.com.',
+  #      'lseed.darosior.ninja',
+  #  ]
 
 
-class BitcoinTestnet(AbstractNet):
+class BitnetTestnet(AbstractNet):
 
     NET_NAME = "testnet"
     TESTNET = True
@@ -142,11 +142,11 @@ class BitcoinTestnet(AbstractNet):
     LN_REALM_BYTE = 1
     LN_DNS_SEEDS = [  # TODO investigate this again
         #'test.nodes.lightning.directory.',  # times out.
-        #'lseed.bitcoinstats.com.',  # ignores REALM byte and returns mainnet peers...
+        #'lseed.bitnetstats.com.',  # ignores REALM byte and returns mainnet peers...
     ]
 
 
-class BitcoinRegtest(BitcoinTestnet):
+class BitnetRegtest(BitnetTestnet):
 
     NET_NAME = "regtest"
     SEGWIT_HRP = "bcrt"
@@ -157,7 +157,7 @@ class BitcoinRegtest(BitcoinTestnet):
     LN_DNS_SEEDS = []
 
 
-class BitcoinSimnet(BitcoinTestnet):
+class BitnetSimnet(BitnetTestnet):
 
     NET_NAME = "simnet"
     WIF_PREFIX = 0x64
@@ -171,7 +171,7 @@ class BitcoinSimnet(BitcoinTestnet):
     LN_DNS_SEEDS = []
 
 
-class BitcoinSignet(BitcoinTestnet):
+class BitnetSignet(BitnetTestnet):
 
     NET_NAME = "signet"
     BOLT11_HRP = "tbs"
@@ -184,24 +184,24 @@ class BitcoinSignet(BitcoinTestnet):
 NETS_LIST = tuple(all_subclasses(AbstractNet))
 
 # don't import net directly, import the module instead (so that net is singleton)
-net = BitcoinMainnet
+net = BitnetMainnet
 
 def set_signet():
     global net
-    net = BitcoinSignet
+    net = BitnetSignet
 
 def set_simnet():
     global net
-    net = BitcoinSimnet
+    net = BitnetSimnet
 
 def set_mainnet():
     global net
-    net = BitcoinMainnet
+    net = BitnetMainnet
 
 def set_testnet():
     global net
-    net = BitcoinTestnet
+    net = BitnetTestnet
 
 def set_regtest():
     global net
-    net = BitcoinRegtest
+    net = BitnetRegtest

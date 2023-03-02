@@ -3,11 +3,11 @@ import traceback
 import sys
 from typing import NamedTuple, Any, Optional, Dict, Union, List, Tuple, TYPE_CHECKING
 
-from electrum.util import bfh, UserCancelled, UserFacingException
+from electrum.util import bfh, bh2u, UserCancelled, UserFacingException
 from electrum.bip32 import BIP32Node
 from electrum import constants
 from electrum.i18n import _
-from electrum.transaction import Transaction, PartialTransaction, PartialTxInput, PartialTxOutput, Sighash
+from electrum.transaction import Transaction, PartialTransaction, PartialTxInput, PartialTxOutput
 from electrum.keystore import Hardware_KeyStore
 from electrum.plugin import Device, runs_in_hwd_thread
 from electrum.base_wizard import ScriptTypeNotSupported
@@ -31,11 +31,14 @@ class KeepKey_KeyStore(Hardware_KeyStore):
 
     plugin: 'KeepKeyPlugin'
 
+    def get_client(self, force_pair=True):
+        return self.plugin.get_client(self, force_pair)
+
     def decrypt_message(self, sequence, message, password):
         raise UserFacingException(_('Encryption and decryption are not implemented by {}').format(self.device))
 
     @runs_in_hwd_thread
-    def sign_message(self, sequence, message, password, *, script_type=None):
+    def sign_message(self, sequence, message, password):
         client = self.get_client()
         address_path = self.get_derivation_prefix() + "/%d/%d"%sequence
         address_n = client.expand_path(address_path)
@@ -196,7 +199,7 @@ class KeepKeyPlugin(HW_PluginBase):
         return client
 
     def get_coin_name(self):
-        return "Testnet" if constants.net.TESTNET else "Bitcoin"
+        return "Testnet" if constants.net.TESTNET else "Bitnet"
 
     def initialize_device(self, device_id, wizard, handler):
         # Initialization method
@@ -219,7 +222,7 @@ class KeepKeyPlugin(HW_PluginBase):
             import threading
             settings = self.request_trezor_init_settings(wizard, method, self.device)
             t = threading.Thread(target=self._initialize_device_safe, args=(settings, method, device_id, wizard, handler))
-            t.daemon = True
+            t.setDaemon(True)
             t.start()
             exit_code = wizard.loop.exec_()
             if exit_code != 0:
@@ -330,8 +333,7 @@ class KeepKeyPlugin(HW_PluginBase):
         outputs = self.tx_outputs(tx, keystore=keystore)
         signatures = client.sign_tx(self.get_coin_name(), inputs, outputs,
                                     lock_time=tx.locktime, version=tx.version)[0]
-        sighash = Sighash.to_sigbytes(Sighash.ALL).hex()
-        signatures = [(x.hex() + sighash) for x in signatures]
+        signatures = [(bh2u(x) + '01') for x in signatures]
         tx.update_signatures(signatures)
 
     @runs_in_hwd_thread

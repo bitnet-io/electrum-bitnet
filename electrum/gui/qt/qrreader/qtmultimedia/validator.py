@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Electron Cash - lightweight Bitcoin client
+# Electron Cash - lightweight Bitnet client
 # Copyright (C) 2019 Axel Gembe <derago@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person
@@ -79,7 +79,7 @@ class QrReaderValidatorCounting(AbstractQrReaderValidator):
 
         for result in results:
             # Increment the detection count
-            if result not in self.result_counts:
+            if not result in self.result_counts:
                 self.result_counts[result] = 0
             self.result_counts[result] += 1
 

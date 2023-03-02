@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2012 thomasv@gitorious
 #
 # Permission is hereby granted, free of charge, to any person
@@ -67,7 +67,7 @@ class WatchtowerDialog(QDialog):
         assert self.network
         self.lnwatcher = self.network.local_watchtower
         self.setWindowTitle(_('Watchtower'))
-        self.setMinimumSize(600, 200)
+        self.setMinimumSize(600, 20)
         self.size_label = QLabel()
         self.watcher_list = WatcherList(self)
 

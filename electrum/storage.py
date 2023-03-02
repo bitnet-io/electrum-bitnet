@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2015 Thomas Voegtlin
 #
 # Permission is hereby granted, free of charge, to any person
@@ -32,7 +32,7 @@ from enum import IntEnum
 
 from . import ecc
 from .util import (profiler, InvalidPassword, WalletFileException, bfh, standardize_path,
-                   test_read_write_permissions, os_chmod)
+                   test_read_write_permissions)
 
 from .wallet_db import WalletDB
 from .logging import Logger
@@ -95,14 +95,14 @@ class WalletStorage(Logger):
         if not self.file_exists():
             assert not os.path.exists(self.path)
         os.replace(temp_path, self.path)
-        os_chmod(self.path, mode)
+        os.chmod(self.path, mode)
         self._file_exists = True
         self.logger.info(f"saved {self.path}")
 
     def file_exists(self) -> bool:
         return self._file_exists
 
-    def is_past_initial_decryption(self) -> bool:
+    def is_past_initial_decryption(self):
         """Return if storage is in a usable state for normal operations.
 
         The value is True exactly
@@ -111,14 +111,14 @@ class WalletStorage(Logger):
         """
         return not self.is_encrypted() or bool(self.pubkey)
 
-    def is_encrypted(self) -> bool:
+    def is_encrypted(self):
         """Return if storage encryption is currently enabled."""
         return self.get_encryption_version() != StorageEncryptionVersion.PLAINTEXT
 
-    def is_encrypted_with_user_pw(self) -> bool:
+    def is_encrypted_with_user_pw(self):
         return self.get_encryption_version() == StorageEncryptionVersion.USER_PASSWORD
 
-    def is_encrypted_with_hw_device(self) -> bool:
+    def is_encrypted_with_hw_device(self):
         return self.get_encryption_version() == StorageEncryptionVersion.XPUB_PASSWORD
 
     def get_encryption_version(self):
@@ -146,8 +146,6 @@ class WalletStorage(Logger):
 
     @staticmethod
     def get_eckey_from_password(password):
-        if password is None:
-            password = ""
         secret = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), b'', iterations=1024)
         ec_key = ecc.ECPrivkey.from_arbitrary_size_secret(secret)
         return ec_key
@@ -162,7 +160,6 @@ class WalletStorage(Logger):
             raise WalletFileException('no encryption magic for version: %s' % v)
 
     def decrypt(self, password) -> None:
-        """Raises an InvalidPassword exception on invalid password"""
         if self.is_past_initial_decryption():
             return
         ec_key = self.get_eckey_from_password(password)

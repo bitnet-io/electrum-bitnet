@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2014 Thomas Voegtlin
 #
 # Permission is hereby granted, free of charge, to any person
@@ -36,13 +36,14 @@ import aiohttp
 try:
     from . import paymentrequest_pb2 as pb2
 except ImportError:
-    sys.exit("Error: could not find paymentrequest_pb2.py. Create it with 'contrib/generate_payreqpb2.sh'")
+    # sudo apt-get install protobuf-compiler
+    sys.exit("Error: could not find paymentrequest_pb2.py. Create it with 'protoc --proto_path=electrum/ --python_out=electrum/ electrum/paymentrequest.proto'")
 
-from . import bitcoin, constants, ecc, util, transaction, x509, rsakey
-from .util import bfh, make_aiohttp_session
-from .invoices import Invoice, get_id_from_onchain_outputs
+from . import bitnet, constants, ecc, util, transaction, x509, rsakey
+from .util import bh2u, bfh, make_aiohttp_session
+from .invoices import OnchainInvoice
 from .crypto import sha256
-from .bitcoin import address_to_script
+from .bitnet import address_to_script
 from .transaction import PartialTxOutput
 from .network import Network
 from .logging import get_logger, Logger
@@ -54,8 +55,8 @@ if TYPE_CHECKING:
 _logger = get_logger(__name__)
 
 
-REQUEST_HEADERS = {'Accept': 'application/bitcoin-paymentrequest', 'User-Agent': 'Electrum'}
-ACK_HEADERS = {'Content-Type':'application/bitcoin-payment','Accept':'application/bitcoin-paymentack','User-Agent':'Electrum'}
+REQUEST_HEADERS = {'Accept': 'application/bitnet-paymentrequest', 'User-Agent': 'Electrum'}
+ACK_HEADERS = {'Content-Type':'application/bitnet-payment','Accept':'application/bitnet-paymentack','User-Agent':'Electrum'}
 
 ca_path = certifi.where()
 ca_list = None
@@ -80,9 +81,9 @@ async def get_payment_request(url: str) -> 'PaymentRequest':
                 async with session.get(url) as response:
                     resp_content = await response.read()
                     response.raise_for_status()
-                    # Guard against `bitcoin:`-URIs with invalid payment request URLs
+                    # Guard against `bitnet:`-URIs with invalid payment request URLs
                     if "Content-Type" not in response.headers \
-                    or response.headers["Content-Type"] != "application/bitcoin-paymentrequest":
+                    or response.headers["Content-Type"] != "application/bitnet-paymentrequest":
                         data = None
                         error = "payment URL not pointing to a payment request handling server"
                     else:
@@ -104,6 +105,13 @@ async def get_payment_request(url: str) -> 'PaymentRequest':
                     _logger.info(f"{error_oneline} -- [DO NOT TRUST THIS MESSAGE] "
                                  f"{repr(e)} text: {error_text_received}")
             data = None
+    elif u.scheme == 'file':
+        try:
+            with open(u.path, 'r', encoding='utf-8') as f:
+                data = f.read()
+        except IOError:
+            data = None
+            error = "payment URL not pointing to a valid file"
     else:
         data = None
         error = f"Unknown scheme for payment request. URL: {url}"
@@ -113,7 +121,7 @@ async def get_payment_request(url: str) -> 'PaymentRequest':
 
 class PaymentRequest:
 
-    def __init__(self, data: bytes, *, error=None):
+    def __init__(self, data, *, error=None):
         self.raw = data
         self.error = error  # FIXME overloaded and also used when 'verify' succeeds
         self.parse(data)
@@ -123,10 +131,11 @@ class PaymentRequest:
     def __str__(self):
         return str(self.raw)
 
-    def parse(self, r: bytes):
+    def parse(self, r):
         self.outputs = []  # type: List[PartialTxOutput]
         if self.error:
             return
+        self.id = bh2u(sha256(r)[0:16])
         try:
             self.data = pb2.PaymentRequest()
             self.data.ParseFromString(r)
@@ -266,10 +275,8 @@ class PaymentRequest:
     def get_memo(self):
         return self.memo
 
-    def get_name_for_export(self) -> Optional[str]:
-        if not hasattr(self, 'details'):
-            return None
-        return get_id_from_onchain_outputs(self.outputs, timestamp=self.get_time())
+    def get_id(self):
+        return self.id if self.requestor else self.get_address()
 
     def get_outputs(self):
         return self.outputs[:]
@@ -317,7 +324,7 @@ class PaymentRequest:
             return False, error
 
 
-def make_unsigned_request(req: 'Invoice'):
+def make_unsigned_request(req: 'OnchainInvoice'):
     addr = req.get_address()
     time = req.time
     exp = req.exp
@@ -325,7 +332,7 @@ def make_unsigned_request(req: 'Invoice'):
         time = 0
     if exp and type(exp) != int:
         exp = 0
-    amount = req.get_amount_sat()
+    amount = req.amount_sat
     if amount is None:
         amount = 0
     memo = req.message
@@ -350,7 +357,7 @@ def sign_request_with_alias(pr, alias, alias_privkey):
     pr.pki_data = str(alias)
     message = pr.SerializeToString()
     ec_key = ecc.ECPrivkey(alias_privkey)
-    compressed = bitcoin.is_compressed_privkey(alias_privkey)
+    compressed = bitnet.is_compressed_privkey(alias_privkey)
     pr.signature = ec_key.sign_message(message, compressed)
 
 
@@ -458,7 +465,7 @@ def serialize_request(req):  # FIXME this is broken
     return pr
 
 
-def make_request(config: 'SimpleConfig', req: 'Invoice'):
+def make_request(config: 'SimpleConfig', req: 'OnchainInvoice'):
     pr = make_unsigned_request(req)
     key_path = config.get('ssl_keyfile')
     cert_path = config.get('ssl_certfile')

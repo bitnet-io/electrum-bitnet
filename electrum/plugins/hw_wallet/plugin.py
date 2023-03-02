@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
 # -*- mode: python -*-
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2016  The Electrum developers
 #
 # Permission is hereby granted, free of charge, to any person
@@ -30,7 +30,7 @@ from functools import partial
 from electrum.plugin import (BasePlugin, hook, Device, DeviceMgr, DeviceInfo,
                              assert_runs_in_hwd_thread, runs_in_hwd_thread)
 from electrum.i18n import _
-from electrum.bitcoin import is_address, opcodes
+from electrum.bitnet import is_address, opcodes
 from electrum.util import bfh, versiontuple, UserFacingException
 from electrum.transaction import TxOutput, Transaction, PartialTransaction, PartialTxInput, PartialTxOutput
 from electrum.bip32 import BIP32Node
@@ -66,14 +66,13 @@ class HW_PluginBase(BasePlugin):
         return self.parent.device_manager
 
     def create_device_from_hid_enumeration(self, d: dict, *, product_key) -> Optional['Device']:
-        # note: id_ needs to be unique between simultaneously connected devices,
-        #       and ideally unchanged while a device is connected.
         # Older versions of hid don't provide interface_number
         interface_number = d.get('interface_number', -1)
         usage_page = d['usage_page']
-        # id_=str(d['path']) in itself might be sufficient, but this had to be touched
-        # a number of times already, so let's just go for the overkill approach:
-        id_ = f"{d['path']},{d['serial_number']},{interface_number},{usage_page}"
+        id_ = d['serial_number']
+        if len(id_) == 0:
+            id_ = str(d['path'])
+        id_ += str(interface_number) + str(usage_page)
         device = Device(path=d['path'],
                         interface_number=interface_number,
                         id_=id_,
@@ -86,7 +85,7 @@ class HW_PluginBase(BasePlugin):
     def close_wallet(self, wallet: 'Abstract_Wallet'):
         for keystore in wallet.get_keystores():
             if isinstance(keystore, self.keystore_class):
-                self.device_manager().unpair_pairing_code(keystore.pairing_code())
+                self.device_manager().unpair_xpub(keystore.xpub)
                 if keystore.thread:
                     keystore.thread.stop()
 
@@ -126,7 +125,7 @@ class HW_PluginBase(BasePlugin):
         if keystore is None:
             keystore = wallet.get_keystore()
         if not is_address(address):
-            keystore.handler.show_error(_('Invalid Bitcoin Address'))
+            keystore.handler.show_error(_('Invalid Bitnet Address'))
             return False
         if not wallet.is_mine(address):
             keystore.handler.show_error(_('Address not in wallet.'))
@@ -157,11 +156,7 @@ class HW_PluginBase(BasePlugin):
                     or versiontuple(library_version) < self.minimum_library
                     or versiontuple(library_version) >= self.maximum_library):
                 raise LibraryFoundButUnusable(library_version=library_version)
-        except ImportError as e:
-            self.libraries_available_message = (
-                _("Missing libraries for {}.").format(self.name)
-                + f"\n    {e!r}"
-            )
+        except ImportError:
             return False
         except LibraryFoundButUnusable as e:
             library_version = e.library_version
@@ -248,8 +243,8 @@ class HardwareClientBase:
         during USB device enumeration (called for each unpaired device).
         Stored in the wallet file.
         """
-        root_fp = self.request_root_fingerprint_from_device()
-        return root_fp
+        # This functionality is optional. If not implemented just return None:
+        return None
 
     def has_usable_connection_with_device(self) -> bool:
         raise NotImplementedError()

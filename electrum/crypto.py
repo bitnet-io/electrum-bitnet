@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2018 The Electrum developers
 #
 # Permission is hereby granted, free of charge, to any person
@@ -24,12 +24,11 @@
 # SOFTWARE.
 
 import base64
-import binascii
 import os
 import sys
 import hashlib
 import hmac
-from typing import Union, Mapping, Optional
+from typing import Union
 
 from .util import assert_bytes, InvalidPassword, to_bytes, to_string, WalletFileException, versiontuple
 from .i18n import _
@@ -85,32 +84,7 @@ if not (HAS_CRYPTODOME or HAS_CRYPTOGRAPHY):
     sys.exit(f"Error: at least one of ('pycryptodomex', 'cryptography') needs to be installed.")
 
 
-def version_info() -> Mapping[str, Optional[str]]:
-    ret = {}
-    if HAS_PYAES:
-        ret["pyaes.version"] = ".".join(map(str, pyaes.VERSION[:3]))
-    else:
-        ret["pyaes.version"] = None
-    if HAS_CRYPTODOME:
-        ret["cryptodome.version"] = Cryptodome.__version__
-        if hasattr(Cryptodome, "__path__"):
-            ret["cryptodome.path"] = ", ".join(Cryptodome.__path__ or [])
-    else:
-        ret["cryptodome.version"] = None
-    if HAS_CRYPTOGRAPHY:
-        ret["cryptography.version"] = cryptography.__version__
-        if hasattr(cryptography, "__path__"):
-            ret["cryptography.path"] = ", ".join(cryptography.__path__ or [])
-    else:
-        ret["cryptography.version"] = None
-    return ret
-
-
 class InvalidPadding(Exception):
-    pass
-
-
-class CiphertextFormatError(Exception):
     pass
 
 
@@ -172,11 +146,22 @@ def aes_decrypt_with_iv(key: bytes, iv: bytes, data: bytes) -> bytes:
         raise InvalidPassword()
 
 
+def EncodeAES_base64(secret: bytes, msg: bytes) -> bytes:
+    """Returns base64 encoded ciphertext."""
+    e = EncodeAES_bytes(secret, msg)
+    return base64.b64encode(e)
+
+
 def EncodeAES_bytes(secret: bytes, msg: bytes) -> bytes:
     assert_bytes(msg)
     iv = bytes(os.urandom(16))
     ct = aes_encrypt_with_iv(secret, iv, msg)
     return iv + ct
+
+
+def DecodeAES_base64(secret: bytes, ciphertext_b64: Union[bytes, str]) -> bytes:
+    ciphertext = bytes(base64.b64decode(ciphertext_b64))
+    return DecodeAES_bytes(secret, ciphertext)
 
 
 def DecodeAES_bytes(secret: bytes, ciphertext: bytes) -> bytes:
@@ -261,10 +246,7 @@ def pw_decode_bytes(data: str, password: Union[bytes, str], *, version:int) -> b
     """base64 ciphertext -> plaintext bytes"""
     if version not in KNOWN_PW_HASH_VERSIONS:
         raise UnexpectedPasswordHashVersion(version)
-    try:
-        data_bytes = bytes(base64.b64decode(data, validate=True))
-    except binascii.Error as e:
-        raise CiphertextFormatError("ciphertext not valid base64") from e
+    data_bytes = bytes(base64.b64decode(data))
     return _pw_decode_raw(data_bytes, password, version=version)
 
 
@@ -281,10 +263,7 @@ def pw_encode_with_version_and_mac(data: bytes, password: Union[bytes, str]) -> 
 
 def pw_decode_with_version_and_mac(data: str, password: Union[bytes, str]) -> bytes:
     """base64 ciphertext -> plaintext bytes"""
-    try:
-        data_bytes = bytes(base64.b64decode(data, validate=True))
-    except binascii.Error as e:
-        raise CiphertextFormatError("ciphertext not valid base64") from e
+    data_bytes = bytes(base64.b64decode(data))
     version = int(data_bytes[0])
     encrypted = data_bytes[1:-4]
     mac = data_bytes[-4:]

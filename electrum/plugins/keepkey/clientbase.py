@@ -70,7 +70,7 @@ class GuiMixin(object):
             msg = _("Enter a passphrase to generate this wallet.  Each time "
                     "you use this wallet your {} will prompt you for the "
                     "passphrase.  If you forget the passphrase you cannot "
-                    "access the bitcoins in the wallet.").format(self.device)
+                    "access the bitnets in the wallet.").format(self.device)
         else:
             msg = _("Enter the passphrase to unlock this wallet:")
         passphrase = self.handler.get_passphrase(msg, self.creating_wallet)
@@ -162,9 +162,6 @@ class KeepKeyClientBase(HardwareClientBase, GuiMixin, Logger):
         self.transport.write(self.proto.Cancel())
 
     def i4b(self, x):
-        if x < 0:
-            # hack. workaround for https://github.com/spesmilo/electrum/issues/7779
-            x += 2 ** 32
         return pack('>I', x)
 
     @runs_in_hwd_thread

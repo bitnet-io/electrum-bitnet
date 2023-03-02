@@ -3,10 +3,9 @@
 
 from PyQt5 import QtCore, QtWidgets
 
-
 class CustomNode:
 
-    def __init__(self, model: 'CustomModel', data):
+    def __init__(self, model, data):
         self.model = model
         self._data = data
         self._children = []

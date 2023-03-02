@@ -1,5 +1,5 @@
 include LICENCE RELEASE-NOTES AUTHORS
-include README.md
+include README.rst
 include electrum.desktop
 include *.py
 include run_electrum
@@ -8,7 +8,8 @@ recursive-include packages cacert.pem
 
 include contrib/requirements/requirements*.txt
 include contrib/deterministic-build/requirements*.txt
-include contrib/*.sh
+include contrib/make_libsecp256k1.sh
+include contrib/build_tools_util.sh
 
 graft electrum
 prune electrum/tests

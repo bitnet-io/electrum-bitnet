@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Electrum - Lightweight Bitcoin Client
+# Electrum - Lightweight Bitnet Client
 # Copyright (C) 2015 Thomas Voegtlin
 #
 # Permission is hereby granted, free of charge, to any person
@@ -35,7 +35,7 @@ from urllib.parse import urljoin
 from urllib.parse import quote
 from aiohttp import ClientResponse
 
-from electrum import ecc, constants, keystore, version, bip32, bitcoin
+from electrum import ecc, constants, keystore, version, bip32, bitnet
 from electrum.bip32 import BIP32Node, xpub_type
 from electrum.crypto import sha256
 from electrum.transaction import PartialTxOutput, PartialTxInput, PartialTransaction, Transaction
@@ -69,7 +69,7 @@ def get_billing_xpub():
         return "xpub6DTBdtBB8qUmH5c77v8qVGVoYk7WjJNpGvutqjLasNG1mbux6KsojaLrYf2sRhXAVU4NaFuHhbD9SvVPRt1MB1MaMooRuhHcAZH1yhQ1qDU"
 
 
-DESKTOP_DISCLAIMER = [
+DISCLAIMER = [
     _("Two-factor authentication is a service provided by TrustedCoin.  "
       "It uses a multi-signature wallet, where you own 2 of 3 keys.  "
       "The third key is stored on a remote server that signs transactions on "
@@ -86,9 +86,8 @@ DESKTOP_DISCLAIMER = [
       "To be safe from malware, you may want to do this on an offline "
       "computer, and move your wallet later to an online computer."),
 ]
-DISCLAIMER = DESKTOP_DISCLAIMER
 
-MOBILE_DISCLAIMER = [
+KIVY_DISCLAIMER = [
     _("Two-factor authentication is a service provided by TrustedCoin. "
       "To use it, you must have a separate device with Google Authenticator."),
     _("This service uses a multi-signature wallet, where you own 2 of 3 keys.  "
@@ -99,8 +98,6 @@ MOBILE_DISCLAIMER = [
       "your funds at any time and at no cost, without the remote server, by "
       "using the 'restore wallet' option with your wallet seed."),
 ]
-KIVY_DISCLAIMER = MOBILE_DISCLAIMER
-
 RESTORE_MSG = _("Enter the seed for your 2-factor wallet:")
 
 class TrustedCoinException(Exception):
@@ -428,9 +425,9 @@ def make_billing_address(wallet, num, addr_type):
     child_node = usernode.subkey_at_public_derivation([num])
     pubkey = child_node.eckey.get_public_key_bytes(compressed=True)
     if addr_type == 'legacy':
-        return bitcoin.public_key_to_p2pkh(pubkey)
+        return bitnet.public_key_to_p2pkh(pubkey)
     elif addr_type == 'segwit':
-        return bitcoin.public_key_to_p2wpkh(pubkey)
+        return bitnet.public_key_to_p2wpkh(pubkey)
     else:
         raise ValueError(f'unexpected billing type: {addr_type}')
 
@@ -519,19 +516,14 @@ class TrustedCoinPlugin(BasePlugin):
         wallet.billing_info = billing_info
         wallet.price_per_tx = dict(billing_info['price_per_tx'])
         wallet.price_per_tx.pop(1, None)
-        self.billing_info_retrieved(wallet)
         return True
-
-    def billing_info_retrieved(self, wallet):
-        # override to handle billing info when it becomes available
-        pass
 
     def start_request_thread(self, wallet):
         from threading import Thread
         if self.requesting is False:
             self.requesting = True
             t = Thread(target=self.request_billing_info, args=(wallet,))
-            t.daemon = True
+            t.setDaemon(True)
             t.start()
             return t
 

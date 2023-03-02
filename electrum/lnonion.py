@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2018 The Electrum developers
 #
 # Permission is hereby granted, free of charge, to any person
@@ -26,11 +26,11 @@
 import io
 import hashlib
 from typing import Sequence, List, Tuple, NamedTuple, TYPE_CHECKING, Dict, Any, Optional
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 
 from . import ecc
 from .crypto import sha256, hmac_oneshot, chacha20_encrypt
-from .util import profiler, xor_bytes, bfh
+from .util import bh2u, profiler, xor_bytes, bfh
 from .lnutil import (get_ecdh, PaymentFailure, NUM_MAX_HOPS_IN_PAYMENT_PATH,
                      NUM_MAX_EDGES_IN_PAYMENT_PATH, ShortChannelID, OnionFailureCodeMetaFlag)
 from .lnmsg import OnionWireSerializer, read_bigsize_int, write_bigsize_int
@@ -122,7 +122,7 @@ class OnionHopsDataSingle:  # called HopData in lnd
         else:  # tlv
             payload_fd = io.BytesIO()
             OnionWireSerializer.write_tlv_stream(fd=payload_fd,
-                                                 tlv_stream_name="payload",
+                                                 tlv_stream_name="tlv_payload",
                                                  **self.payload)
             payload_bytes = payload_fd.getvalue()
             with io.BytesIO() as fd:
@@ -157,7 +157,7 @@ class OnionHopsDataSingle:  # called HopData in lnd
                 raise Exception(f"unexpected EOF")
             ret = OnionHopsDataSingle(is_tlv_payload=True)
             ret.payload = OnionWireSerializer.read_tlv_stream(fd=io.BytesIO(hop_payload),
-                                                              tlv_stream_name="payload")
+                                                              tlv_stream_name="tlv_payload")
             ret.hmac = fd.read(PER_HOP_HMAC_SIZE)
             assert len(ret.hmac) == PER_HOP_HMAC_SIZE
             return ret

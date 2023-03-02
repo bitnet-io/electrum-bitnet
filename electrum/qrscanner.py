@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2015 Thomas Voegtlin
 #
 # Permission is hereby granted, free of charge, to any person
@@ -100,12 +100,6 @@ def find_system_cameras() -> Mapping[str, str]:
             name = name.strip('\n')
             devices[name] = os.path.join("/dev", device)
     return devices
-
-
-def version_info() -> Mapping[str, Optional[str]]:
-    return {
-        "libzbar.path": libzbar._name if libzbar else None,
-    }
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Electrum - Lightweight Bitcoin Client
+# Electrum - Lightweight Bitnet Client
 # Copyright (C) 2015 Thomas Voegtlin
 #
 # Permission is hereby granted, free of charge, to any person
@@ -99,11 +99,10 @@ class Plugin(TrustedCoinPlugin):
                 _('Therefore, two-factor authentication is disabled.')
             ])
             action = lambda: window.show_message(msg)
-            icon = read_QIcon("trustedcoin-status-disabled.png")
         else:
             action = partial(self.settings_dialog, window)
-            icon = read_QIcon("trustedcoin-status.png")
-        button = StatusBarButton(icon, _("TrustedCoin"), action)
+        button = StatusBarButton(read_QIcon("trustedcoin-status.png"),
+                                 _("TrustedCoin"), action)
         window.statusBar().addPermanentWidget(button)
         self.start_request_thread(window.wallet)
 
@@ -279,7 +278,7 @@ class Plugin(TrustedCoinPlugin):
         tos_e.tos_signal.connect(on_result)
         tos_e.error_signal.connect(on_error)
         t = threading.Thread(target=request_TOS)
-        t.daemon = True
+        t.setDaemon(True)
         t.start()
         email_e.textChanged.connect(set_enabled)
         email_e.setFocus(True)

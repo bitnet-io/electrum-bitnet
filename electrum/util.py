@@ -1,4 +1,4 @@
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2011 Thomas Voegtlin
 #
 # Permission is hereby granted, free of charge, to any person
@@ -33,7 +33,7 @@ import urllib
 import threading
 import hmac
 import stat
-import locale
+from locale import localeconv
 import asyncio
 import urllib.request, urllib.parse, urllib.error
 import builtins
@@ -47,12 +47,12 @@ import random
 import secrets
 import functools
 from abc import abstractmethod, ABC
-import socket
 
 import attr
 import aiohttp
 from aiohttp_socks import ProxyConnector, ProxyType
 import aiorpcx
+from aiorpcx import TaskGroup
 import certifi
 import dns.resolver
 
@@ -83,18 +83,18 @@ def all_subclasses(cls) -> Set:
 ca_path = certifi.where()
 
 
-base_units = {'BTC':8, 'mBTC':5, 'bits':2, 'sat':0}
+base_units = {'BIT':8, 'mBIT':5, 'bits':2, 'sat':0}
 base_units_inverse = inv_dict(base_units)
-base_units_list = ['BTC', 'mBTC', 'bits', 'sat']  # list(dict) does not guarantee order
+base_units_list = ['BIT', 'mBIT', 'bits', 'sat']  # list(dict) does not guarantee order
 
-DECIMAL_POINT_DEFAULT = 5  # mBTC
+DECIMAL_POINT_DEFAULT = 8  # mBIT
 
 
 class UnknownBaseUnit(Exception): pass
 
 
 def decimal_point_to_base_unit_name(dp: int) -> str:
-    # e.g. 8 -> "BTC"
+    # e.g. 8 -> "BIT"
     try:
         return base_units_inverse[dp]
     except KeyError:
@@ -102,37 +102,12 @@ def decimal_point_to_base_unit_name(dp: int) -> str:
 
 
 def base_unit_name_to_decimal_point(unit_name: str) -> int:
-    # e.g. "BTC" -> 8
+    # e.g. "BIT" -> 8
     try:
         return base_units[unit_name]
     except KeyError:
         raise UnknownBaseUnit(unit_name) from None
 
-def parse_max_spend(amt: Any) -> Optional[int]:
-    """Checks if given amount is "spend-max"-like.
-    Returns None or the positive integer weight for "max". Never raises.
-
-    When creating invoices and on-chain txs, the user can specify to send "max".
-    This is done by setting the amount to '!'. Splitting max between multiple
-    tx outputs is also possible, and custom weights (positive ints) can also be used.
-    For example, to send 40% of all coins to address1, and 60% to address2:
-    ```
-    address1, 2!
-    address2, 3!
-    ```
-    """
-    if not (isinstance(amt, str) and amt and amt[-1] == '!'):
-        return None
-    if amt == '!':
-        return 1
-    x = amt[:-1]
-    try:
-        x = int(x)
-    except ValueError:
-        return None
-    if x > 0:
-        return x
-    return None
 
 class NotEnoughFunds(Exception):
     def __str__(self):
@@ -144,19 +119,14 @@ class NoDynamicFeeEstimates(Exception):
         return _('Dynamic fee estimates not available')
 
 
-class BelowDustLimit(Exception):
-    pass
+class MultipleSpendMaxTxOutputs(Exception):
+    def __str__(self):
+        return _('At most one output can be set to spend max')
 
 
 class InvalidPassword(Exception):
-    def __init__(self, message: Optional[str] = None):
-        self.message = message
-
     def __str__(self):
-        if self.message is None:
-            return _("Incorrect password")
-        else:
-            return str(self.message)
+        return _("Incorrect password")
 
 
 class AddTransactionException(Exception):
@@ -187,7 +157,7 @@ class FileExportFailed(Exception):
 class WalletFileException(Exception): pass
 
 
-class BitcoinException(Exception): pass
+class BitnetException(Exception): pass
 
 
 class UserFacingException(Exception):
@@ -350,7 +320,7 @@ class DaemonThread(threading.Thread, Logger):
     def __init__(self):
         threading.Thread.__init__(self)
         Logger.__init__(self)
-        self.parent_thread = threading.current_thread()
+        self.parent_thread = threading.currentThread()
         self.running = False
         self.running_lock = threading.Lock()
         self.job_lock = threading.Lock()
@@ -445,7 +415,7 @@ def profiler(func):
         t0 = time.time()
         o = func(*args, **kw_args)
         t = time.time() - t0
-        _profiler_logger.debug(f"{name} {t:,.4f} sec")
+        _profiler_logger.debug(f"{name} {t:,.4f}")
         return o
     return lambda *args, **kw_args: do_profile(args, kw_args)
 
@@ -455,8 +425,7 @@ def android_ext_dir():
     return primary_external_storage_path()
 
 def android_backup_dir():
-    pkgname = get_android_package_name()
-    d = os.path.join(android_ext_dir(), pkgname)
+    d = os.path.join(android_ext_dir(), 'org.electrum.electrum')
     if not os.path.exists(d):
         os.mkdir(d)
     return d
@@ -510,9 +479,6 @@ def standardize_path(path):
 
 
 def get_new_wallet_name(wallet_folder: str) -> str:
-    """Returns a file basename for a new wallet to be used.
-    Can raise OSError.
-    """
     i = 1
     while True:
         filename = "wallet_%d" % i
@@ -521,26 +487,6 @@ def get_new_wallet_name(wallet_folder: str) -> str:
         else:
             break
     return filename
-
-
-def is_android_debug_apk() -> bool:
-    is_android = 'ANDROID_DATA' in os.environ
-    if not is_android:
-        return False
-    from jnius import autoclass
-    pkgname = get_android_package_name()
-    build_config = autoclass(f"{pkgname}.BuildConfig")
-    return bool(build_config.DEBUG)
-
-
-def get_android_package_name() -> str:
-    is_android = 'ANDROID_DATA' in os.environ
-    assert is_android
-    from jnius import autoclass
-    from android.config import ACTIVITY_CLASS_NAME
-    activity = autoclass(ACTIVITY_CLASS_NAME).mActivity
-    pkgname = str(activity.getPackageName())
-    return pkgname
 
 
 def assert_bytes(*args):
@@ -589,6 +535,17 @@ def to_bytes(something, encoding='utf8') -> bytes:
 bfh = bytes.fromhex
 
 
+def bh2u(x: bytes) -> str:
+    """
+    str with hex representation of a bytes-like object
+
+    >>> x = bytes((1, 2, 10))
+    >>> bh2u(x)
+    '01020A'
+    """
+    return x.hex()
+
+
 def xor_bytes(a: bytes, b: bytes) -> bytes:
     size = min(len(a), len(b))
     return ((int.from_bytes(a[:size], "big") ^ int.from_bytes(b[:size], "big"))
@@ -601,11 +558,11 @@ def user_dir():
     elif 'ANDROID_DATA' in os.environ:
         return android_data_dir()
     elif os.name == 'posix':
-        return os.path.join(os.environ["HOME"], ".electrum")
+        return os.path.join(os.environ["HOME"], ".electrum-bitnet")
     elif "APPDATA" in os.environ:
-        return os.path.join(os.environ["APPDATA"], "Electrum")
+        return os.path.join(os.environ["APPDATA"], "Electrum-Bitnet")
     elif "LOCALAPPDATA" in os.environ:
-        return os.path.join(os.environ["LOCALAPPDATA"], "Electrum")
+        return os.path.join(os.environ["LOCALAPPDATA"], "Electrum-Bitnet")
     else:
         #raise Exception("No home directory found in environment variables.")
         return
@@ -670,16 +627,11 @@ def chunks(items, size: int):
         yield items[i: i + size]
 
 
-def format_satoshis_plain(
-        x: Union[int, float, Decimal, str],  # amount in satoshis,
-        *,
-        decimal_point: int = 8,  # how much to shift decimal point to left (default: sat->BTC)
-) -> str:
+def format_satoshis_plain(x, *, decimal_point=8) -> str:
     """Display a satoshi amount scaled.  Always uses a '.' as a decimal
     point and has no thousands separator"""
-    if parse_max_spend(x):
-        return f'max({x})'
-    assert isinstance(x, (int, float, Decimal)), f"{x!r} should be a number"
+    if x == '!':
+        return 'max'
     scale_factor = pow(10, decimal_point)
     return "{:.8f}".format(Decimal(x) / scale_factor).rstrip('0').rstrip('.')
 
@@ -691,65 +643,44 @@ def format_satoshis_plain(
 # We enforce that we have at least that available.
 assert decimal.getcontext().prec >= 28, f"PyDecimal precision too low: {decimal.getcontext().prec}"
 
-# DECIMAL_POINT = locale.localeconv()['decimal_point']  # type: str
-DECIMAL_POINT = "."
-THOUSANDS_SEP = " "
-assert len(DECIMAL_POINT) == 1, f"DECIMAL_POINT has unexpected len. {DECIMAL_POINT!r}"
-assert len(THOUSANDS_SEP) == 1, f"THOUSANDS_SEP has unexpected len. {THOUSANDS_SEP!r}"
+DECIMAL_POINT = localeconv()['decimal_point']  # type: str
 
 
 def format_satoshis(
-        x: Union[int, float, Decimal, str, None],  # amount in satoshis
+        x,  # in satoshis
         *,
-        num_zeros: int = 0,
-        decimal_point: int = 8,  # how much to shift decimal point to left (default: sat->BTC)
-        precision: int = 0,  # extra digits after satoshi precision
-        is_diff: bool = False,  # if True, enforce a leading sign (+/-)
-        whitespaces: bool = False,  # if True, add whitespaces, to align numbers in a column
-        add_thousands_sep: bool = False,  # if True, add whitespaces, for better readability of the numbers
+        num_zeros=0,
+        decimal_point=8,
+        precision=None,
+        is_diff=False,
+        whitespaces=False,
 ) -> str:
     if x is None:
         return 'unknown'
-    if parse_max_spend(x):
-        return f'max({x})'
-    assert isinstance(x, (int, float, Decimal)), f"{x!r} should be a number"
-    # lose redundant precision
-    x = Decimal(x).quantize(Decimal(10) ** (-precision))
+    if x == '!':
+        return 'max'
+    if precision is None:
+        precision = decimal_point
     # format string
-    overall_precision = decimal_point + precision  # max digits after final decimal point
-    decimal_format = "." + str(overall_precision) if overall_precision > 0 else ""
+    decimal_format = "." + str(precision) if precision > 0 else ""
     if is_diff:
         decimal_format = '+' + decimal_format
     # initial result
     scale_factor = pow(10, decimal_point)
+    if not isinstance(x, Decimal):
+        x = Decimal(x).quantize(Decimal('1E-8'))
     result = ("{:" + decimal_format + "f}").format(x / scale_factor)
     if "." not in result: result += "."
     result = result.rstrip('0')
-    # add extra decimal places (zeros)
+    # extra decimal places
     integer_part, fract_part = result.split(".")
     if len(fract_part) < num_zeros:
         fract_part += "0" * (num_zeros - len(fract_part))
-    # add whitespaces as thousands' separator for better readability of numbers
-    if add_thousands_sep:
-        sign = integer_part[0] if integer_part[0] in ("+", "-") else ""
-        if sign == "-":
-            integer_part = integer_part[1:]
-        integer_part = "{:,}".format(int(integer_part)).replace(',', THOUSANDS_SEP)
-        integer_part = sign + integer_part
-        fract_part = THOUSANDS_SEP.join(fract_part[i:i+3] for i in range(0, len(fract_part), 3))
     result = integer_part + DECIMAL_POINT + fract_part
-    # add leading/trailing whitespaces so that numbers can be aligned in a column
+    # leading/trailing whitespaces
     if whitespaces:
-        target_fract_len = overall_precision
-        target_integer_len = 14 - decimal_point  # should be enough for up to unsigned 999999 BTC
-        if add_thousands_sep:
-            target_fract_len += max(0, (target_fract_len - 1) // 3)
-            target_integer_len += max(0, (target_integer_len - 1) // 3)
-        # add trailing whitespaces
-        result += " " * (target_fract_len - len(fract_part))
-        # add leading whitespaces
-        target_total_len = target_integer_len + 1 + target_fract_len
-        result = " " * (target_total_len - len(result)) + result
+        result += " " * (decimal_point - len(fract_part))
+        result = " " * (15 - len(result)) + result
     return result
 
 
@@ -784,14 +715,14 @@ def format_time(timestamp):
 # Takes a timestamp and returns a string with the approximation of the age
 def age(from_date, since_date = None, target_tz=None, include_seconds=False):
     if from_date is None:
-        return _("Unknown")
+        return "Unknown"
 
     from_date = datetime.fromtimestamp(from_date)
     if since_date is None:
         since_date = datetime.now(target_tz)
 
     td = time_difference(from_date - since_date, include_seconds)
-    return (_("{} ago") if from_date < since_date else _("in {}")).format(td)
+    return td + " ago" if from_date < since_date else "in " + td
 
 
 def time_difference(distance_in_time, include_seconds):
@@ -801,66 +732,30 @@ def time_difference(distance_in_time, include_seconds):
 
     if distance_in_minutes == 0:
         if include_seconds:
-            return _("{} seconds").format(distance_in_seconds)
+            return "%s seconds" % distance_in_seconds
         else:
-            return _("less than a minute")
+            return "less than a minute"
     elif distance_in_minutes < 45:
-        return _("about {} minutes").format(distance_in_minutes)
+        return "%s minutes" % distance_in_minutes
     elif distance_in_minutes < 90:
-        return _("about 1 hour")
+        return "about 1 hour"
     elif distance_in_minutes < 1440:
-        return _("about {} hours").format(round(distance_in_minutes / 60.0))
+        return "about %d hours" % (round(distance_in_minutes / 60.0))
     elif distance_in_minutes < 2880:
-        return _("about 1 day")
+        return "1 day"
     elif distance_in_minutes < 43220:
-        return _("about {} days").format(round(distance_in_minutes / 1440))
+        return "%d days" % (round(distance_in_minutes / 1440))
     elif distance_in_minutes < 86400:
-        return _("about 1 month")
+        return "about 1 month"
     elif distance_in_minutes < 525600:
-        return _("about {} months").format(round(distance_in_minutes / 43200))
+        return "%d months" % (round(distance_in_minutes / 43200))
     elif distance_in_minutes < 1051200:
-        return _("about 1 year")
+        return "about 1 year"
     else:
-        return _("over {} years").format(round(distance_in_minutes / 525600))
+        return "over %d years" % (round(distance_in_minutes / 525600))
 
 mainnet_block_explorers = {
-    'Bitupper Explorer': ('https://bitupper.com/en/explorer/bitcoin/',
-                        {'tx': 'transactions/', 'addr': 'addresses/'}),
-    'Bitflyer.jp': ('https://chainflyer.bitflyer.jp/',
-                        {'tx': 'Transaction/', 'addr': 'Address/'}),
-    'Blockchain.info': ('https://blockchain.com/btc/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'blockchainbdgpzk.onion': ('https://blockchainbdgpzk.onion/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'Blockstream.info': ('https://blockstream.info/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'Bitaps.com': ('https://btc.bitaps.com/',
-                        {'tx': '', 'addr': ''}),
-    'BTC.com': ('https://btc.com/',
-                        {'tx': '', 'addr': ''}),
-    'Chain.so': ('https://www.chain.so/',
-                        {'tx': 'tx/BTC/', 'addr': 'address/BTC/'}),
-    'Insight.is': ('https://insight.bitpay.com/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'TradeBlock.com': ('https://tradeblock.com/blockchain/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'BlockCypher.com': ('https://live.blockcypher.com/btc/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'Blockchair.com': ('https://blockchair.com/bitcoin/',
-                        {'tx': 'transaction/', 'addr': 'address/'}),
-    'blockonomics.co': ('https://www.blockonomics.co/',
-                        {'tx': 'api/tx?txid=', 'addr': '#/search?q='}),
-    'mempool.space': ('https://mempool.space/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'mempool.emzy.de': ('https://mempool.emzy.de/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'OXT.me': ('https://oxt.me/',
-                        {'tx': 'transaction/', 'addr': 'address/'}),
-    'smartbit.com.au': ('https://www.smartbit.com.au/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'mynode.local': ('http://mynode.local:3002/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'system default': ('blockchain:/',
+    'Bitexplorer.io': ('https://bitexplorer.io/',
                         {'tx': 'tx/', 'addr': 'address/'}),
 }
 
@@ -886,11 +781,9 @@ signet_block_explorers = {
                         {'tx': 'tx/', 'addr': 'address/'}),
     'mempool.space': ('https://mempool.space/signet/',
                         {'tx': 'tx/', 'addr': 'address/'}),
-    'bitcoinexplorer.org': ('https://signet.bitcoinexplorer.org/',
+    'bitnetexplorer.org': ('https://signet.bitnetexplorer.org/',
                        {'tx': 'tx/', 'addr': 'address/'}),
     'wakiyamap.dev': ('https://signet-explorer.wakiyamap.dev/',
-                       {'tx': 'tx/', 'addr': 'address/'}),
-    'ex.signet.bublina.eu.org': ('https://ex.signet.bublina.eu.org/',
                        {'tx': 'tx/', 'addr': 'address/'}),
     'system default': ('blockchain:/',
                        {'tx': 'tx/', 'addr': 'address/'}),
@@ -957,31 +850,30 @@ def block_explorer_URL(config: 'SimpleConfig', kind: str, item: str) -> Optional
 
 
 # note: when checking against these, use .lower() to support case-insensitivity
-BITCOIN_BIP21_URI_SCHEME = 'bitcoin'
+BITCOIN_BIP21_URI_SCHEME = 'bitnet'
 LIGHTNING_URI_SCHEME = 'lightning'
 
 
-class InvalidBitcoinURI(Exception): pass
+class InvalidBitnetURI(Exception): pass
 
 
 # TODO rename to parse_bip21_uri or similar
 def parse_URI(uri: str, on_pr: Callable = None, *, loop=None) -> dict:
-    """Raises InvalidBitcoinURI on malformed URI."""
-    from . import bitcoin
-    from .bitcoin import COIN, TOTAL_COIN_SUPPLY_LIMIT_IN_BTC
-    from .lnaddr import lndecode, LnDecodeException
+    """Raises InvalidBitnetURI on malformed URI."""
+    from . import bitnet
+    from .bitnet import COIN, TOTAL_COIN_SUPPLY_LIMIT_IN_BIT
 
     if not isinstance(uri, str):
-        raise InvalidBitcoinURI(f"expected string, not {repr(uri)}")
+        raise InvalidBitnetURI(f"expected string, not {repr(uri)}")
 
     if ':' not in uri:
-        if not bitcoin.is_address(uri):
-            raise InvalidBitcoinURI("Not a bitcoin address")
+        if not bitnet.is_address(uri):
+            raise InvalidBitnetURI("Not a bitnet address")
         return {'address': uri}
 
     u = urllib.parse.urlparse(uri)
     if u.scheme.lower() != BITCOIN_BIP21_URI_SCHEME:
-        raise InvalidBitcoinURI("Not a bitcoin URI")
+        raise InvalidBitnetURI("Not a bitnet URI")
     address = u.path
 
     # python for android fails to parse query
@@ -993,12 +885,12 @@ def parse_URI(uri: str, on_pr: Callable = None, *, loop=None) -> dict:
 
     for k, v in pq.items():
         if len(v) != 1:
-            raise InvalidBitcoinURI(f'Duplicate Key: {repr(k)}')
+            raise InvalidBitnetURI(f'Duplicate Key: {repr(k)}')
 
     out = {k: v[0] for k, v in pq.items()}
     if address:
-        if not bitcoin.is_address(address):
-            raise InvalidBitcoinURI(f"Invalid bitcoin address: {address}")
+        if not bitnet.is_address(address):
+            raise InvalidBitnetURI(f"Invalid bitnet address: {address}")
         out['address'] = address
     if 'amount' in out:
         am = out['amount']
@@ -1009,11 +901,11 @@ def parse_URI(uri: str, on_pr: Callable = None, *, loop=None) -> dict:
                 amount = Decimal(m.group(1)) * pow(Decimal(10), k)
             else:
                 amount = Decimal(am) * COIN
-            if amount > TOTAL_COIN_SUPPLY_LIMIT_IN_BTC * COIN:
-                raise InvalidBitcoinURI(f"amount is out-of-bounds: {amount!r} BTC")
+            if amount > TOTAL_COIN_SUPPLY_LIMIT_IN_BIT * COIN:
+                raise InvalidBitnetURI(f"amount is out-of-bounds: {amount!r} BIT")
             out['amount'] = int(amount)
         except Exception as e:
-            raise InvalidBitcoinURI(f"failed to parse 'amount' field: {repr(e)}") from e
+            raise InvalidBitnetURI(f"failed to parse 'amount' field: {repr(e)}") from e
     if 'message' in out:
         out['message'] = out['message']
         out['memo'] = out['message']
@@ -1021,32 +913,17 @@ def parse_URI(uri: str, on_pr: Callable = None, *, loop=None) -> dict:
         try:
             out['time'] = int(out['time'])
         except Exception as e:
-            raise InvalidBitcoinURI(f"failed to parse 'time' field: {repr(e)}") from e
+            raise InvalidBitnetURI(f"failed to parse 'time' field: {repr(e)}") from e
     if 'exp' in out:
         try:
             out['exp'] = int(out['exp'])
         except Exception as e:
-            raise InvalidBitcoinURI(f"failed to parse 'exp' field: {repr(e)}") from e
+            raise InvalidBitnetURI(f"failed to parse 'exp' field: {repr(e)}") from e
     if 'sig' in out:
         try:
-            out['sig'] = bitcoin.base_decode(out['sig'], base=58).hex()
+            out['sig'] = bh2u(bitnet.base_decode(out['sig'], base=58))
         except Exception as e:
-            raise InvalidBitcoinURI(f"failed to parse 'sig' field: {repr(e)}") from e
-    if 'lightning' in out:
-        try:
-            lnaddr = lndecode(out['lightning'])
-        except LnDecodeException as e:
-            raise InvalidBitcoinURI(f"Failed to decode 'lightning' field: {e!r}") from e
-        amount_sat = out.get('amount')
-        if amount_sat:
-            # allow small leeway due to msat precision
-            if abs(amount_sat - int(lnaddr.get_amount_sat())) > 1:
-                raise InvalidBitcoinURI("Inconsistent lightning field in bip21: amount")
-        address = out.get('address')
-        ln_fallback_addr = lnaddr.get_fallback_address()
-        if address and ln_fallback_addr:
-            if ln_fallback_addr != address:
-                raise InvalidBitcoinURI("Inconsistent lightning field in bip21: address")
+            raise InvalidBitnetURI(f"failed to parse 'sig' field: {repr(e)}") from e
 
     r = out.get('r')
     sig = out.get('sig')
@@ -1062,7 +939,7 @@ def parse_URI(uri: str, on_pr: Callable = None, *, loop=None) -> dict:
                 request = await pr.get_payment_request(r)
             if on_pr:
                 on_pr(request)
-        loop = loop or get_asyncio_loop()
+        loop = loop or asyncio.get_event_loop()
         asyncio.run_coroutine_threadsafe(get_payment_request(), loop)
 
     return out
@@ -1070,8 +947,8 @@ def parse_URI(uri: str, on_pr: Callable = None, *, loop=None) -> dict:
 
 def create_bip21_uri(addr, amount_sat: Optional[int], message: Optional[str],
                      *, extra_query_params: Optional[dict] = None) -> str:
-    from . import bitcoin
-    if not bitcoin.is_address(addr):
+    from . import bitnet
+    if not bitnet.is_address(addr):
         return ""
     if extra_query_params is None:
         extra_query_params = {}
@@ -1096,27 +973,14 @@ def create_bip21_uri(addr, amount_sat: Optional[int], message: Optional[str],
     return str(urllib.parse.urlunparse(p))
 
 
-def maybe_extract_lightning_payment_identifier(data: str) -> Optional[str]:
+def maybe_extract_bolt11_invoice(data: str) -> Optional[str]:
     data = data.strip()  # whitespaces
     data = data.lower()
     if data.startswith(LIGHTNING_URI_SCHEME + ':ln'):
-        cut_prefix = LIGHTNING_URI_SCHEME + ':'
-        data = data[len(cut_prefix):]
+        data = data[10:]
     if data.startswith('ln'):
         return data
     return None
-
-
-def is_uri(data: str) -> bool:
-    data = data.lower()
-    if (data.startswith(LIGHTNING_URI_SCHEME + ":") or
-            data.startswith(BITCOIN_BIP21_URI_SCHEME + ':')):
-        return True
-    return False
-
-
-class FailedToParsePaymentIdentifier(Exception):
-    pass
 
 
 # Python bug (http://bugs.python.org/issue1927) causes raw_input
@@ -1170,8 +1034,7 @@ def setup_thread_excepthook():
 
 
 def send_exception_to_crash_reporter(e: BaseException):
-    from .base_crash_reporter import send_exception_to_crash_reporter
-    send_exception_to_crash_reporter(e)
+    sys.excepthook(type(e), e, e.__traceback__)
 
 
 def versiontuple(v):
@@ -1191,7 +1054,6 @@ def read_json_file(path):
         raise FileImportFailed(e)
     return data
 
-
 def write_json_file(path, data):
     try:
         with open(path, 'w+', encoding='utf-8') as f:
@@ -1201,36 +1063,13 @@ def write_json_file(path, data):
         raise FileExportFailed(e)
 
 
-def os_chmod(path, mode):
-    """os.chmod aware of tmpfs"""
-    try:
-        os.chmod(path, mode)
-    except OSError as e:
-        xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR", None)
-        if xdg_runtime_dir and is_subpath(path, xdg_runtime_dir):
-            _logger.info(f"Tried to chmod in tmpfs. Skipping... {e!r}")
-        else:
-            raise
-
-
 def make_dir(path, allow_symlink=True):
     """Make directory if it does not yet exist."""
     if not os.path.exists(path):
         if not allow_symlink and os.path.islink(path):
             raise Exception('Dangling link: ' + path)
         os.mkdir(path)
-        os_chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-
-
-def is_subpath(long_path: str, short_path: str) -> bool:
-    """Returns whether long_path is a sub-path of short_path."""
-    try:
-        common = os.path.commonpath([long_path, short_path])
-    except ValueError:
-        return False
-    short_path = standardize_path(short_path)
-    common     = standardize_path(common)
-    return short_path == common
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
 
 
 def log_exceptions(func):
@@ -1260,6 +1099,9 @@ def ignore_exceptions(func):
     async def wrapper(*args, **kwargs):
         try:
             return await func(*args, **kwargs)
+        except asyncio.CancelledError:
+            # note: with python 3.8, CancelledError no longer inherits Exception, so this catch is redundant
+            raise
         except Exception as e:
             pass
     return wrapper
@@ -1279,65 +1121,6 @@ class TxMinedInfo(NamedTuple):
     timestamp: Optional[int] = None    # timestamp of block that mined tx
     txpos: Optional[int] = None        # position of tx in serialized block
     header_hash: Optional[str] = None  # hash of block that mined tx
-
-
-class ShortID(bytes):
-
-    def __repr__(self):
-        return f"<ShortID: {format_short_id(self)}>"
-
-    def __str__(self):
-        return format_short_id(self)
-
-    @classmethod
-    def from_components(cls, block_height: int, tx_pos_in_block: int, output_index: int) -> 'ShortID':
-        bh = block_height.to_bytes(3, byteorder='big')
-        tpos = tx_pos_in_block.to_bytes(3, byteorder='big')
-        oi = output_index.to_bytes(2, byteorder='big')
-        return ShortID(bh + tpos + oi)
-
-    @classmethod
-    def from_str(cls, scid: str) -> 'ShortID':
-        """Parses a formatted scid str, e.g. '643920x356x0'."""
-        components = scid.split("x")
-        if len(components) != 3:
-            raise ValueError(f"failed to parse ShortID: {scid!r}")
-        try:
-            components = [int(x) for x in components]
-        except ValueError:
-            raise ValueError(f"failed to parse ShortID: {scid!r}") from None
-        return ShortID.from_components(*components)
-
-    @classmethod
-    def normalize(cls, data: Union[None, str, bytes, 'ShortID']) -> Optional['ShortID']:
-        if isinstance(data, ShortID) or data is None:
-            return data
-        if isinstance(data, str):
-            assert len(data) == 16
-            return ShortID.fromhex(data)
-        if isinstance(data, (bytes, bytearray)):
-            assert len(data) == 8
-            return ShortID(data)
-
-    @property
-    def block_height(self) -> int:
-        return int.from_bytes(self[:3], byteorder='big')
-
-    @property
-    def txpos(self) -> int:
-        return int.from_bytes(self[3:6], byteorder='big')
-
-    @property
-    def output_index(self) -> int:
-        return int.from_bytes(self[6:8], byteorder='big')
-
-
-def format_short_id(short_channel_id: Optional[bytes]):
-    if not short_channel_id:
-        return _('Not yet available')
-    return str(int.from_bytes(short_channel_id[:3], 'big')) \
-        + 'x' + str(int.from_bytes(short_channel_id[3:6], 'big')) \
-        + 'x' + str(int.from_bytes(short_channel_id[6:], 'big'))
 
 
 def make_aiohttp_session(proxy: Optional[dict], headers=None, timeout=None):
@@ -1367,97 +1150,13 @@ def make_aiohttp_session(proxy: Optional[dict], headers=None, timeout=None):
     return aiohttp.ClientSession(headers=headers, timeout=timeout, connector=connector)
 
 
-class OldTaskGroup(aiorpcx.TaskGroup):
-    """Automatically raises exceptions on join; as in aiorpcx prior to version 0.20.
-    That is, when using TaskGroup as a context manager, if any task encounters an exception,
-    we would like that exception to be re-raised (propagated out). For the wait=all case,
-    the OldTaskGroup class is emulating the following code-snippet:
-    ```
-    async with TaskGroup() as group:
-        await group.spawn(task1())
-        await group.spawn(task2())
+class SilentTaskGroup(TaskGroup):
 
-        async for task in group:
-            if not task.cancelled():
-                task.result()
-    ```
-    So instead of the above, one can just write:
-    ```
-    async with OldTaskGroup() as group:
-        await group.spawn(task1())
-        await group.spawn(task2())
-    ```
-    # TODO see if we can migrate to asyncio.timeout, introduced in python 3.11, and use stdlib instead of aiorpcx.curio...
-    """
-    async def join(self):
-        if self._wait is all:
-            exc = False
-            try:
-                async for task in self:
-                    if not task.cancelled():
-                        task.result()
-            except BaseException:  # including asyncio.CancelledError
-                exc = True
-                raise
-            finally:
-                if exc:
-                    await self.cancel_remaining()
-                await super().join()
-        else:
-            await super().join()
-            if self.completed:
-                self.completed.result()
-
-# We monkey-patch aiorpcx TimeoutAfter (used by timeout_after and ignore_after API),
-# to fix a timing issue present in asyncio as a whole re timing out tasks.
-# To see the issue we are trying to fix, consider example:
-#     async def outer_task():
-#         async with timeout_after(0.1):
-#             await inner_task()
-# When the 0.1 sec timeout expires, inner_task will get cancelled by timeout_after (=internal cancellation).
-# If around the same time (in terms of event loop iterations) another coroutine
-# cancels outer_task (=external cancellation), there will be a race.
-# Both cancellations work by propagating a CancelledError out to timeout_after, which then
-# needs to decide (in TimeoutAfter.__aexit__) whether it's due to an internal or external cancellation.
-# AFAICT asyncio provides no reliable way of distinguishing between the two.
-# This patch tries to always give priority to external cancellations.
-# see https://github.com/kyuupichan/aiorpcX/issues/44
-# see https://github.com/aio-libs/async-timeout/issues/229
-# see https://bugs.python.org/issue42130 and https://bugs.python.org/issue45098
-# TODO see if we can migrate to asyncio.timeout, introduced in python 3.11, and use stdlib instead of aiorpcx.curio...
-def _aiorpcx_monkeypatched_set_new_deadline(task, deadline):
-    def timeout_task():
-        task._orig_cancel()
-        task._timed_out = None if getattr(task, "_externally_cancelled", False) else deadline
-    def mycancel(*args, **kwargs):
-        task._orig_cancel(*args, **kwargs)
-        task._externally_cancelled = True
-        task._timed_out = None
-    if not hasattr(task, "_orig_cancel"):
-        task._orig_cancel = task.cancel
-        task.cancel = mycancel
-    task._deadline_handle = task._loop.call_at(deadline, timeout_task)
-
-
-def _aiorpcx_monkeypatched_set_task_deadline(task, deadline):
-    ret = _aiorpcx_orig_set_task_deadline(task, deadline)
-    task._externally_cancelled = None
-    return ret
-
-
-def _aiorpcx_monkeypatched_unset_task_deadline(task):
-    if hasattr(task, "_orig_cancel"):
-        task.cancel = task._orig_cancel
-        del task._orig_cancel
-    return _aiorpcx_orig_unset_task_deadline(task)
-
-
-_aiorpcx_orig_set_task_deadline    = aiorpcx.curio._set_task_deadline
-_aiorpcx_orig_unset_task_deadline  = aiorpcx.curio._unset_task_deadline
-
-aiorpcx.curio._set_new_deadline    = _aiorpcx_monkeypatched_set_new_deadline
-aiorpcx.curio._set_task_deadline   = _aiorpcx_monkeypatched_set_task_deadline
-aiorpcx.curio._unset_task_deadline = _aiorpcx_monkeypatched_unset_task_deadline
+    def spawn(self, *args, **kwargs):
+        # don't complain if group is already closed.
+        if self._closed:
+            raise asyncio.CancelledError()
+        return super().spawn(*args, **kwargs)
 
 
 class NetworkJobOnDefaultServer(Logger, ABC):
@@ -1467,6 +1166,7 @@ class NetworkJobOnDefaultServer(Logger, ABC):
     """
     def __init__(self, network: 'Network'):
         Logger.__init__(self)
+        asyncio.set_event_loop(network.asyncio_loop)
         self.network = network
         self.interface = None  # type: Interface
         self._restart_lock = asyncio.Lock()
@@ -1484,15 +1184,14 @@ class NetworkJobOnDefaultServer(Logger, ABC):
         """Initialise fields. Called every time the underlying
         server connection changes.
         """
-        self.taskgroup = OldTaskGroup()
-        self.reset_request_counters()
+        self.taskgroup = SilentTaskGroup()
 
     async def _start(self, interface: 'Interface'):
         self.interface = interface
         await interface.taskgroup.spawn(self._run_tasks(taskgroup=self.taskgroup))
 
     @abstractmethod
-    async def _run_tasks(self, *, taskgroup: OldTaskGroup) -> None:
+    async def _run_tasks(self, *, taskgroup: TaskGroup) -> None:
         """Start tasks in taskgroup. Called every time the underlying
         server connection changes.
         """
@@ -1517,13 +1216,6 @@ class NetworkJobOnDefaultServer(Logger, ABC):
             self._reset()
             await self._start(interface)
 
-    def reset_request_counters(self):
-        self._requests_sent = 0
-        self._requests_answered = 0
-
-    def num_requests_sent_and_answered(self) -> Tuple[int, int]:
-        return self._requests_sent, self._requests_answered
-
     @property
     def session(self):
         s = self.interface.session
@@ -1531,76 +1223,9 @@ class NetworkJobOnDefaultServer(Logger, ABC):
         return s
 
 
-def detect_tor_socks_proxy() -> Optional[Tuple[str, int]]:
-    # Probable ports for Tor to listen at
-    candidates = [
-        ("127.0.0.1", 9050),
-        ("127.0.0.1", 9150),
-    ]
-    for net_addr in candidates:
-        if is_tor_socks_port(*net_addr):
-            return net_addr
-    return None
-
-
-def is_tor_socks_port(host: str, port: int) -> bool:
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.1)
-            s.connect((host, port))
-            # mimic "tor-resolve 0.0.0.0".
-            # see https://github.com/spesmilo/electrum/issues/7317#issuecomment-1369281075
-            # > this is a socks5 handshake, followed by a socks RESOLVE request as defined in
-            # > [tor's socks extension spec](https://github.com/torproject/torspec/blob/7116c9cdaba248aae07a3f1d0e15d9dd102f62c5/socks-extensions.txt#L63),
-            # > resolving 0.0.0.0, which being an IP, tor resolves itself without needing to ask a relay.
-            s.send(b'\x05\x01\x00\x05\xf0\x00\x03\x070.0.0.0\x00\x00')
-            if s.recv(1024) == b'\x05\x00\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00':
-                return True
-    except socket.error:
-        pass
-    return False
-
-
-AS_LIB_USER_I_WANT_TO_MANAGE_MY_OWN_ASYNCIO_LOOP = False  # used by unit tests
-
-_asyncio_event_loop = None  # type: Optional[asyncio.AbstractEventLoop]
-def get_asyncio_loop() -> asyncio.AbstractEventLoop:
-    """Returns the global asyncio event loop we use."""
-    if loop := _asyncio_event_loop:
-        return loop
-    if AS_LIB_USER_I_WANT_TO_MANAGE_MY_OWN_ASYNCIO_LOOP:
-        if loop := get_running_loop():
-            return loop
-    raise Exception("event loop not created yet")
-
-
 def create_and_start_event_loop() -> Tuple[asyncio.AbstractEventLoop,
                                            asyncio.Future,
                                            threading.Thread]:
-    global _asyncio_event_loop
-    if _asyncio_event_loop is not None:
-        raise Exception("there is already a running event loop")
-
-    # asyncio.get_event_loop() became deprecated in python3.10. (see https://github.com/python/cpython/issues/83710)
-    # We set a custom event loop policy purely to be compatible with code that
-    # relies on asyncio.get_event_loop().
-    # - in python 3.8-3.9, asyncio.Event.__init__, asyncio.Lock.__init__,
-    #   and similar, calls get_event_loop. see https://github.com/python/cpython/pull/23420
-    class MyEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
-        def get_event_loop(self):
-            # In case electrum is being used as a library, there might be other
-            # event loops in use besides ours. To minimise interfering with those,
-            # if there is a loop running in the current thread, return that:
-            running_loop = get_running_loop()
-            if running_loop is not None:
-                return running_loop
-            # Otherwise, return our global loop:
-            return get_asyncio_loop()
-    asyncio.set_event_loop_policy(MyEventLoopPolicy())
-
-    loop = asyncio.new_event_loop()
-    _asyncio_event_loop = loop
-
     def on_exception(loop, context):
         """Suppress spurious messages it appears we cannot control."""
         SUPPRESS_MESSAGE_REGEX = re.compile('SSL handshake|Fatal read error on|'
@@ -1610,30 +1235,14 @@ def create_and_start_event_loop() -> Tuple[asyncio.AbstractEventLoop,
             return
         loop.default_exception_handler(context)
 
-    def run_event_loop():
-        try:
-            loop.run_until_complete(stopping_fut)
-        finally:
-            # clean-up
-            global _asyncio_event_loop
-            _asyncio_event_loop = None
-
+    loop = asyncio.get_event_loop()
     loop.set_exception_handler(on_exception)
-    # loop.set_debug(True)
-    stopping_fut = loop.create_future()
-    loop_thread = threading.Thread(
-        target=run_event_loop,
-        name='EventLoop',
-    )
+    # loop.set_debug(1)
+    stopping_fut = asyncio.Future()
+    loop_thread = threading.Thread(target=loop.run_until_complete,
+                                         args=(stopping_fut,),
+                                         name='EventLoop')
     loop_thread.start()
-    # Wait until the loop actually starts.
-    # On a slow PC, or with a debugger attached, this can take a few dozens of ms,
-    # and if we returned without a running loop, weird things can happen...
-    t0 = time.monotonic()
-    while not loop.is_running():
-        time.sleep(0.01)
-        if time.monotonic() - t0 > 5:
-            raise Exception("been waiting for 5 seconds but asyncio loop would not start!")
     return loop, stopping_fut, loop_thread
 
 
@@ -1720,21 +1329,8 @@ def is_ip_address(x: Union[str, bytes]) -> bool:
         return False
 
 
-def is_localhost(host: str) -> bool:
-    if str(host) in ('localhost', 'localhost.',):
-        return True
-    if host[0] == '[' and host[-1] == ']':  # IPv6
-        host = host[1:-1]
-    try:
-        ip_addr = ipaddress.ip_address(host)  # type: Union[IPv4Address, IPv6Address]
-        return ip_addr.is_loopback
-    except ValueError:
-        pass  # not an IP
-    return False
-
-
 def is_private_netaddress(host: str) -> bool:
-    if is_localhost(host):
+    if str(host) in ('localhost', 'localhost.',):
         return True
     if host[0] == '[' and host[-1] == ']':  # IPv6
         host = host[1:-1]
@@ -1782,11 +1378,12 @@ class CallbackManager:
     def __init__(self):
         self.callback_lock = threading.Lock()
         self.callbacks = defaultdict(list)      # note: needs self.callback_lock
+        self.asyncio_loop = None
 
-    def register_callback(self, func, events):
+    def register_callback(self, callback, events):
         with self.callback_lock:
             for event in events:
-                self.callbacks[event].append(func)
+                self.callbacks[event].append(callback)
 
     def unregister_callback(self, callback):
         with self.callback_lock:
@@ -1799,57 +1396,23 @@ class CallbackManager:
         Can be called from any thread. The callback itself will get scheduled
         on the event loop.
         """
-        loop = get_asyncio_loop()
-        assert loop.is_running(), "event loop not running"
+        if self.asyncio_loop is None:
+            self.asyncio_loop = asyncio.get_event_loop()
+            assert self.asyncio_loop.is_running(), "event loop not running"
         with self.callback_lock:
             callbacks = self.callbacks[event][:]
         for callback in callbacks:
             # FIXME: if callback throws, we will lose the traceback
             if asyncio.iscoroutinefunction(callback):
-                asyncio.run_coroutine_threadsafe(callback(*args), loop)
-            elif get_running_loop() == loop:
-                # run callback immediately, so that it is guaranteed
-                # to have been executed when this method returns
-                callback(*args)
+                asyncio.run_coroutine_threadsafe(callback(event, *args), self.asyncio_loop)
             else:
-                loop.call_soon_threadsafe(callback, *args)
+                self.asyncio_loop.call_soon_threadsafe(callback, event, *args)
 
 
 callback_mgr = CallbackManager()
 trigger_callback = callback_mgr.trigger_callback
 register_callback = callback_mgr.register_callback
 unregister_callback = callback_mgr.unregister_callback
-_event_listeners = defaultdict(set)  # type: Dict[str, Set[str]]
-
-
-class EventListener:
-
-    def _list_callbacks(self):
-        for c in self.__class__.__mro__:
-            classpath = f"{c.__module__}.{c.__name__}"
-            for method_name in _event_listeners[classpath]:
-                method = getattr(self, method_name)
-                assert callable(method)
-                assert method_name.startswith('on_event_')
-                yield method_name[len('on_event_'):], method
-
-    def register_callbacks(self):
-        for name, method in self._list_callbacks():
-            #_logger.debug(f'registering callback {method}')
-            register_callback(method, [name])
-
-    def unregister_callbacks(self):
-        for name, method in self._list_callbacks():
-            #_logger.debug(f'unregistering callback {method}')
-            unregister_callback(method)
-
-
-def event_listener(func):
-    classname, method_name = func.__qualname__.split('.')
-    assert method_name.startswith('on_event_')
-    classpath = f"{func.__module__}.{classname}"
-    _event_listeners[classpath].add(method_name)
-    return func
 
 
 _NetAddrType = TypeVar("_NetAddrType")
@@ -1919,7 +1482,7 @@ class NetworkRetryManager(Generic[_NetAddrType]):
 class MySocksProxy(aiorpcx.SOCKSProxy):
 
     async def open_connection(self, host=None, port=None, **kwargs):
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_event_loop()
         reader = asyncio.StreamReader(loop=loop)
         protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
         transport, _ = await self.create_connection(
@@ -2027,9 +1590,10 @@ class nullcontext:
     async def __aexit__(self, *excinfo):
         pass
 
-
-def get_running_loop() -> Optional[asyncio.AbstractEventLoop]:
-    """Returns the asyncio event loop that is *running in this thread*, if any."""
+def get_running_loop():
+    """Mimics _get_running_loop convenient functionality for sanity checks on all python versions"""
+    if sys.version_info < (3, 7):
+        return asyncio._get_running_loop()
     try:
         return asyncio.get_running_loop()
     except RuntimeError:

@@ -6,20 +6,18 @@ import time
 from datetime import datetime
 from typing import Optional, Any
 
-from PyQt5.QtCore import Qt, QDateTime, pyqtSignal
+from PyQt5.QtCore import Qt, QDateTime
 from PyQt5.QtGui import QPalette, QPainter
 from PyQt5.QtWidgets import (QWidget, QLineEdit, QStyle, QStyleOptionFrame, QComboBox,
                              QHBoxLayout, QDateTimeEdit)
 
 from electrum.i18n import _
-from electrum.bitcoin import NLOCKTIME_MIN, NLOCKTIME_MAX, NLOCKTIME_BLOCKHEIGHT_MAX
+from electrum.bitnet import NLOCKTIME_MIN, NLOCKTIME_MAX, NLOCKTIME_BLOCKHEIGHT_MAX
 
 from .util import char_width_in_lineedit, ColorScheme
 
 
 class LockTimeEdit(QWidget):
-
-    valueEdited = pyqtSignal()
 
     def __init__(self, parent=None):
         QWidget.__init__(self, parent)
@@ -64,11 +62,6 @@ class LockTimeEdit(QWidget):
         for w in self.editors:
             hbox.addWidget(w)
         hbox.addStretch(1)
-
-        self.locktime_height_e.textEdited.connect(self.valueEdited.emit)
-        self.locktime_raw_e.textEdited.connect(self.valueEdited.emit)
-        self.locktime_date_e.dateTimeChanged.connect(self.valueEdited.emit)
-        self.combo.currentIndexChanged.connect(self.valueEdited.emit)
 
     def get_locktime(self) -> Optional[int]:
         return self.editor.get_locktime()
@@ -149,7 +142,7 @@ class LockTimeHeightEdit(LockTimeRawEdit):
         textRect.adjust(2, 0, -10, 0)
         painter = QPainter(self)
         painter.setPen(ColorScheme.GRAY.as_color())
-        painter.drawText(textRect, int(Qt.AlignRight | Qt.AlignVCenter), "height")
+        painter.drawText(textRect, Qt.AlignRight | Qt.AlignVCenter, "height")
 
 
 def get_max_allowed_timestamp() -> int:

@@ -1,4 +1,4 @@
-# Electrum - Lightweight Bitcoin Client
+# Electrum - Lightweight Bitnet Client
 # Copyright (c) 2012 Thomas Voegtlin
 #
 # Permission is hereby granted, free of charge, to any person
@@ -26,12 +26,13 @@ from typing import Sequence, Optional, TYPE_CHECKING
 
 import aiorpcx
 
-from .util import TxMinedInfo, NetworkJobOnDefaultServer
+from .util import bh2u, TxMinedInfo, NetworkJobOnDefaultServer
 from .crypto import sha256d
-from .bitcoin import hash_decode, hash_encode
+from .bitnet import hash_decode, hash_encode
 from .transaction import Transaction
 from .blockchain import hash_header
 from .interface import GracefulDisconnect
+from .network import UntrustedServerReturnedError
 from . import constants
 
 if TYPE_CHECKING:
@@ -81,14 +82,13 @@ class SPV(NetworkJobOnDefaultServer):
             if tx_hash in self.requested_merkle or tx_hash in self.merkle_roots:
                 continue
             # or before headers are available
-            if not (0 < tx_height <= local_height):
+            if tx_height <= 0 or tx_height > local_height:
                 continue
             # if it's in the checkpoint region, we still might not have the header
             header = self.blockchain.read_header(tx_height)
             if header is None:
                 if tx_height < constants.net.max_checkpoint():
-                    # FIXME these requests are not counted (self._requests_sent += 1)
-                    await self.taskgroup.spawn(self.interface.request_chunk(tx_height, None, can_return_early=True))
+                    await self.taskgroup.spawn(self.network.request_chunk(tx_height, None, can_return_early=True))
                 continue
             # request now
             self.logger.info(f'requested merkle {tx_hash}')
@@ -97,16 +97,15 @@ class SPV(NetworkJobOnDefaultServer):
 
     async def _request_and_verify_single_proof(self, tx_hash, tx_height):
         try:
-            self._requests_sent += 1
             async with self._network_request_semaphore:
-                merkle = await self.interface.get_merkle_for_transaction(tx_hash, tx_height)
-        except aiorpcx.jsonrpc.RPCError:
+                merkle = await self.network.get_merkle_for_transaction(tx_hash, tx_height)
+        except UntrustedServerReturnedError as e:
+            if not isinstance(e.original_exception, aiorpcx.jsonrpc.RPCError):
+                raise
             self.logger.info(f'tx {tx_hash} not at height {tx_height}')
             self.wallet.remove_unverified_tx(tx_hash, tx_height)
             self.requested_merkle.discard(tx_hash)
             return
-        finally:
-            self._requests_answered += 1
         # Verify the hash of the server-provided merkle branch to a
         # transaction matches the merkle root of its block
         if tx_height != merkle.get('block_height'):
@@ -153,7 +152,7 @@ class SPV(NetworkJobOnDefaultServer):
             if len(item) != 32:
                 raise MerkleVerificationFailure('all merkle branch items have to 32 bytes long')
             inner_node = (item + h) if (index & 1) else (h + item)
-            cls._raise_if_valid_tx(inner_node.hex())
+            cls._raise_if_valid_tx(bh2u(inner_node))
             h = sha256d(inner_node)
             index >>= 1
         if index != 0:
@@ -163,9 +162,9 @@ class SPV(NetworkJobOnDefaultServer):
     @classmethod
     def _raise_if_valid_tx(cls, raw_tx: str):
         # If an inner node of the merkle proof is also a valid tx, chances are, this is an attack.
-        # https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2018-June/016105.html
-        # https://lists.linuxfoundation.org/pipermail/bitcoin-dev/attachments/20180609/9f4f5b1f/attachment-0001.pdf
-        # https://bitcoin.stackexchange.com/questions/76121/how-is-the-leaf-node-weakness-in-merkle-trees-exploitable/76122#76122
+        # https://lists.linuxfoundation.org/pipermail/bitnet-dev/2018-June/016105.html
+        # https://lists.linuxfoundation.org/pipermail/bitnet-dev/attachments/20180609/9f4f5b1f/attachment-0001.pdf
+        # https://bitnet.stackexchange.com/questions/76121/how-is-the-leaf-node-weakness-in-merkle-trees-exploitable/76122#76122
         tx = Transaction(raw_tx)
         try:
             tx.deserialize()
@@ -191,8 +190,7 @@ class SPV(NetworkJobOnDefaultServer):
         self.requested_merkle.discard(tx_hash)
 
     def is_up_to_date(self):
-        return (not self.requested_merkle
-                and not self.wallet.unverified_tx)
+        return not self.requested_merkle
 
 
 def verify_tx_is_in_block(tx_hash: str, merkle_branch: Sequence[str],

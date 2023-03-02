@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2016 Thomas Voegtlin
 #
 # Permission is hereby granted, free of charge, to any person
@@ -30,7 +30,7 @@ import traceback
 from functools import partial
 from typing import List, TYPE_CHECKING, Tuple, NamedTuple, Any, Dict, Optional, Union
 
-from . import bitcoin
+from . import bitnet
 from . import keystore
 from . import mnemonic
 from .bip32 import is_bip32_derivation, xpub_type, normalize_bip32_derivation, BIP32Node
@@ -147,7 +147,7 @@ class BaseWizard(Logger):
             ('standard',  _("Standard wallet")),
             ('2fa', _("Wallet with two-factor authentication")),
             ('multisig',  _("Multi-signature wallet")),
-            ('imported',  _("Import Bitcoin addresses or private keys")),
+            ('imported',  _("Import Bitnet addresses or private keys")),
         ]
         choices = [pair for pair in wallet_kinds if pair[0] in wallet_types]
         self.choice_dialog(title=title, message=message, choices=choices, run_next=self.on_wallet_type)
@@ -226,8 +226,8 @@ class BaseWizard(Logger):
 
     def import_addresses_or_keys(self):
         v = lambda x: keystore.is_address_list(x) or keystore.is_private_key_list(x, raise_on_error=True)
-        title = _("Import Bitcoin Addresses")
-        message = _("Enter a list of Bitcoin addresses (this will create a watching-only wallet), or a list of private keys.")
+        title = _("Import Bitnet Addresses")
+        message = _("Enter a list of Bitnet addresses (this will create a watching-only wallet), or a list of private keys.")
         self.add_xpub_dialog(title=title, message=message, run_next=self.on_import,
                              is_valid=v, allow_multi=True, show_wif_help=True)
 
@@ -236,16 +236,16 @@ class BaseWizard(Logger):
         if keystore.is_address_list(text):
             self.data['addresses'] = {}
             for addr in text.split():
-                assert bitcoin.is_address(addr)
+                assert bitnet.is_address(addr)
                 self.data['addresses'][addr] = {}
         elif keystore.is_private_key_list(text):
             self.data['addresses'] = {}
             k = keystore.Imported_KeyStore({})
             keys = keystore.get_private_keys(text)
             for pk in keys:
-                assert bitcoin.is_private_key(pk)
+                assert bitnet.is_private_key(pk)
                 txin_type, pubkey = k.import_privkey(pk, None)
-                addr = bitcoin.pubkey_to_address(txin_type, pubkey)
+                addr = bitnet.pubkey_to_address(txin_type, pubkey)
                 self.data['addresses'][addr] = {'type':txin_type, 'pubkey':pubkey}
             self.keystores.append(k)
         else:
@@ -313,9 +313,9 @@ class BaseWizard(Logger):
                     continue
                 # see if plugin recognizes 'scanned_devices'
                 try:
-                    # FIXME: side-effect: this sets client.handler
-                    device_infos = devmgr.list_pairable_device_infos(
-                        handler=None, plugin=plugin, devices=scanned_devices, include_failing_clients=True)
+                    # FIXME: side-effect: unpaired_device_info sets client.handler
+                    device_infos = devmgr.unpaired_device_infos(None, plugin, devices=scanned_devices,
+                                                                include_failing_clients=True)
                 except HardwarePluginLibraryUnavailable as e:
                     failed_getting_device_infos(name, e)
                     continue
@@ -622,7 +622,7 @@ class BaseWizard(Logger):
                 password = k.get_password_for_storage_encryption()
             except UserCancelled:
                 devmgr = self.plugins.device_manager
-                devmgr.unpair_pairing_code(k.pairing_code())
+                devmgr.unpair_xpub(k.xpub)
                 raise ChooseHwDeviceAgain()
             except BaseException as e:
                 self.logger.exception('')

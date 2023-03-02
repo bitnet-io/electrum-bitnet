@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- mode: python -*-
 #
-# Electrum - lightweight Bitcoin client
+# Electrum - lightweight Bitnet client
 # Copyright (C) 2016  The Electrum developers
 #
 # Permission is hereby granted, free of charge, to any person
@@ -28,7 +28,7 @@ import threading
 from functools import partial
 from typing import TYPE_CHECKING, Union, Optional, Callable, Any
 
-from PyQt5.QtCore import QObject, pyqtSignal, Qt
+from PyQt5.QtCore import QObject, pyqtSignal
 from PyQt5.QtWidgets import QVBoxLayout, QLineEdit, QHBoxLayout, QLabel
 
 from electrum.gui.qt.password_dialog import PasswordLayout, PW_PASSPHRASE
@@ -40,7 +40,7 @@ from electrum.gui.qt.installwizard import InstallWizard
 
 from electrum.i18n import _
 from electrum.logging import Logger
-from electrum.util import parse_URI, InvalidBitcoinURI, UserCancelled, UserFacingException
+from electrum.util import parse_URI, InvalidBitnetURI, UserCancelled, UserFacingException
 from electrum.plugin import hook, DeviceUnpairableError
 
 from .plugin import OutdatedHwFirmwareException, HW_PluginBase, HardwareHandlerBase
@@ -167,17 +167,14 @@ class QtHandlerBase(HardwareHandlerBase, QObject, Logger):
         self.word = text.text()
         self.done.set()
 
-    MESSAGE_DIALOG_TITLE = None  # type: Optional[str]
-    def message_dialog(self, msg, on_cancel=None):
+    def message_dialog(self, msg, on_cancel):
+        # Called more than once during signing, to confirm output and fee
         self.clear_dialog()
-        title = self.MESSAGE_DIALOG_TITLE
-        if title is None:
-            title = _('Please check your {} device').format(self.device)
+        title = _('Please check your {} device').format(self.device)
         self.dialog = dialog = WindowModalDialog(self.top_level_window(), title)
-        label = QLabel(msg)
-        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        l = QLabel(msg)
         vbox = QVBoxLayout(dialog)
-        vbox.addWidget(label)
+        vbox.addWidget(l)
         if on_cancel:
             dialog.rejected.connect(on_cancel)
             vbox.addLayout(Buttons(CancelButton(dialog)))
@@ -230,8 +227,28 @@ class QtPluginBase(object):
             keystore.thread = TaskThread(window, on_error=partial(self.on_task_thread_error, window, keystore))
             self.add_show_address_on_hw_device_button_for_receive_addr(wallet, keystore, window)
         # Trigger pairings
-        devmgr = self.device_manager()
-        trigger_pairings = partial(devmgr.trigger_pairings, relevant_keystores, allow_user_interaction=True)
+        def trigger_pairings():
+            devmgr = self.device_manager()
+            devices = devmgr.scan_devices()
+            # first pair with all devices that can be auto-selected
+            for keystore in relevant_keystores:
+                try:
+                    self.get_client(keystore=keystore,
+                                    force_pair=True,
+                                    allow_user_interaction=False,
+                                    devices=devices)
+                except UserCancelled:
+                    pass
+            # now do manual selections
+            for keystore in relevant_keystores:
+                try:
+                    self.get_client(keystore=keystore,
+                                    force_pair=True,
+                                    allow_user_interaction=True,
+                                    devices=devices)
+                except UserCancelled:
+                    pass
+
         some_keystore = relevant_keystores[0]
         some_keystore.thread.add(trigger_pairings)
 
@@ -264,7 +281,7 @@ class QtPluginBase(object):
         '''This dialog box should be usable even if the user has
         forgotten their PIN or it is in bootloader mode.'''
         assert window.gui_thread != threading.current_thread(), 'must not be called from GUI thread'
-        device_id = self.device_manager().id_by_pairing_code(keystore.pairing_code())
+        device_id = self.device_manager().xpub_id(keystore.xpub)
         if not device_id:
             try:
                 info = self.device_manager().select_device(self, keystore.handler, keystore)
@@ -283,7 +300,7 @@ class QtPluginBase(object):
                                                               keystore: 'Hardware_KeyStore',
                                                               main_window: ElectrumWindow):
         plugin = keystore.plugin
-        receive_address_e = main_window.receive_tab.receive_address_e
+        receive_address_e = main_window.receive_address_e
 
         def show_address():
             addr = str(receive_address_e.text())

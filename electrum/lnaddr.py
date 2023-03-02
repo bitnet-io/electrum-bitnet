@@ -11,21 +11,16 @@ from typing import Optional, TYPE_CHECKING, Type
 import random
 import bitstring
 
-from .bitcoin import hash160_to_b58_address, b58_address_to_hash160, TOTAL_COIN_SUPPLY_LIMIT_IN_BTC
+from .bitnet import hash160_to_b58_address, b58_address_to_hash160, TOTAL_COIN_SUPPLY_LIMIT_IN_BIT
 from .segwit_addr import bech32_encode, bech32_decode, CHARSET
 from . import segwit_addr
 from . import constants
 from .constants import AbstractNet
 from . import ecc
-from .bitcoin import COIN
+from .bitnet import COIN
 
 if TYPE_CHECKING:
     from .lnutil import LnFeatures
-
-
-class LnInvoiceException(Exception): pass
-class LnDecodeException(LnInvoiceException): pass
-class LnEncodeException(LnInvoiceException): pass
 
 
 # BOLT #11:
@@ -33,18 +28,16 @@ class LnEncodeException(LnInvoiceException): pass
 # A writer MUST encode `amount` as a positive decimal integer with no
 # leading zeroes, SHOULD use the shortest representation possible.
 def shorten_amount(amount):
-    """ Given an amount in bitcoin, shorten it
+    """ Given an amount in bitnet, shorten it
     """
     # Convert to pico initially
     amount = int(amount * 10**12)
-    units = ['p', 'n', 'u', 'm']
+    units = ['p', 'n', 'u', 'm', '']
     for unit in units:
         if amount % 1000 == 0:
             amount //= 1000
         else:
             break
-    else:
-        unit = ''
     return str(amount) + unit
 
 def unshorten_amount(amount) -> Decimal:
@@ -68,7 +61,7 @@ def unshorten_amount(amount) -> Decimal:
     # A reader SHOULD fail if `amount` contains a non-digit, or is followed by
     # anything except a `multiplier` in the table above.
     if not re.fullmatch("\\d+[pnum]?", str(amount)):
-        raise LnDecodeException("Invalid amount '{}'".format(amount))
+        raise ValueError("Invalid amount '{}'".format(amount))
 
     if unit in units.keys():
         return Decimal(amount[:-1]) / units[unit]
@@ -104,7 +97,7 @@ def encode_fallback(fallback: str, net: Type[AbstractNet]):
         elif addrtype == net.ADDRTYPE_P2SH:
             wver = 18
         else:
-            raise LnEncodeException(f"Unknown address type {addrtype} for {net}")
+            raise ValueError(f"Unknown address type {addrtype} for {net}")
         wprog = addr
     return tagged('f', bitstring.pack("uint:5", wver) + wprog)
 
@@ -198,7 +191,7 @@ def lnencode(addr: 'LnAddr', privkey) -> str:
         # A writer MUST NOT include more than one `d`, `h`, `n` or `x` fields,
         if k in ('d', 'h', 'n', 'x', 'p', 's'):
             if k in tags_set:
-                raise LnEncodeException("Duplicate '{}' tag".format(k))
+                raise ValueError("Duplicate '{}' tag".format(k))
 
         if k == 'r':
             route = bitstring.BitArray()
@@ -211,8 +204,7 @@ def lnencode(addr: 'LnAddr', privkey) -> str:
             route = bitstring.BitArray(pubkey) + bitstring.pack('intbe:32', feebase) + bitstring.pack('intbe:32', feerate) + bitstring.pack('intbe:16', cltv)
             data += tagged('t', route)
         elif k == 'f':
-            if v is not None:
-                data += encode_fallback(v, addr.net)
+            data += encode_fallback(v, addr.net)
         elif k == 'd':
             # truncate to max length: 1024*5 bits = 639 bytes
             data += tagged_bytes('d', v.encode()[0:639])
@@ -236,7 +228,7 @@ def lnencode(addr: 'LnAddr', privkey) -> str:
             data += tagged('9', feature_bits)
         else:
             # FIXME: Support unknown tags?
-            raise LnEncodeException("Unknown tag {}".format(k))
+            raise ValueError("Unknown tag {}".format(k))
 
         tags_set.add(k)
 
@@ -246,7 +238,7 @@ def lnencode(addr: 'LnAddr', privkey) -> str:
     # both.
     if 'd' in tags_set and 'h' in tags_set:
         raise ValueError("Cannot include both 'd' and 'h'")
-    if 'd' not in tags_set and 'h' not in tags_set:
+    if not 'd' in tags_set and not 'h' in tags_set:
         raise ValueError("Must include either 'd' or 'h'")
 
     # We actually sign the hrp, then data (padded to 8 bits with zeroes).
@@ -271,7 +263,7 @@ class LnAddr(object):
         self.signature = None
         self.pubkey = None
         self.net = constants.net if net is None else net  # type: Type[AbstractNet]
-        self._amount = amount  # type: Optional[Decimal]  # in bitcoins
+        self._amount = amount  # type: Optional[Decimal]  # in bitnets
         self._min_final_cltv_expiry = 18
 
     @property
@@ -281,16 +273,16 @@ class LnAddr(object):
     @amount.setter
     def amount(self, value):
         if not (isinstance(value, Decimal) or value is None):
-            raise LnInvoiceException(f"amount must be Decimal or None, not {value!r}")
+            raise ValueError(f"amount must be Decimal or None, not {value!r}")
         if value is None:
             self._amount = None
             return
         assert isinstance(value, Decimal)
-        if value.is_nan() or not (0 <= value <= TOTAL_COIN_SUPPLY_LIMIT_IN_BTC):
-            raise LnInvoiceException(f"amount is out-of-bounds: {value!r} BTC")
+        if value.is_nan() or not (0 <= value <= TOTAL_COIN_SUPPLY_LIMIT_IN_BIT):
+            raise ValueError(f"amount is out-of-bounds: {value!r} BIT")
         if value * 10**12 % 10:
             # max resolution is millisatoshi
-            raise LnInvoiceException(f"Cannot encode {value!r}: too many decimal places")
+            raise ValueError(f"Cannot encode {value!r}: too many decimal places")
         self._amount = value
 
     def get_amount_sat(self) -> Optional[Decimal]:
@@ -337,9 +329,6 @@ class LnAddr(object):
     def get_description(self) -> str:
         return self.get_tag('d') or ''
 
-    def get_fallback_address(self) -> str:
-        return self.get_tag('f') or ''
-
     def get_expiry(self) -> int:
         exp = self.get_tag('x')
         if exp is None:
@@ -352,6 +341,8 @@ class LnAddr(object):
         # we treat it as 0 seconds here (instead of never)
         return now > self.get_expiry() + self.date
 
+
+class LnDecodeException(Exception): pass
 
 class SerializableKey:
     def __init__(self, pubkey):
@@ -366,24 +357,24 @@ def lndecode(invoice: str, *, verbose=False, net=None) -> LnAddr:
     hrp = decoded_bech32.hrp
     data = decoded_bech32.data
     if decoded_bech32.encoding is None:
-        raise LnDecodeException("Bad bech32 checksum")
+        raise ValueError("Bad bech32 checksum")
     if decoded_bech32.encoding != segwit_addr.Encoding.BECH32:
-        raise LnDecodeException("Bad bech32 encoding: must be using vanilla BECH32")
+        raise ValueError("Bad bech32 encoding: must be using vanilla BECH32")
 
     # BOLT #11:
     #
     # A reader MUST fail if it does not understand the `prefix`.
     if not hrp.startswith('ln'):
-        raise LnDecodeException("Does not start with ln")
+        raise ValueError("Does not start with ln")
 
     if not hrp[2:].startswith(net.BOLT11_HRP):
-        raise LnDecodeException(f"Wrong Lightning invoice HRP {hrp[2:]}, should be {net.BOLT11_HRP}")
+        raise ValueError(f"Wrong Lightning invoice HRP {hrp[2:]}, should be {net.BOLT11_HRP}")
 
     data = u5_to_bitarray(data)
 
     # Final signature 65 bytes, split it off.
     if len(data) < 65*8:
-        raise LnDecodeException("Too short to contain signature")
+        raise ValueError("Too short to contain signature")
     sigdecoded = data[-65*8:].tobytes()
     data = bitstring.ConstBitStream(data[:-65*8])
 
@@ -512,8 +503,7 @@ def lndecode(invoice: str, *, verbose=False, net=None) -> LnAddr:
         #
         # A reader MUST use the `n` field to validate the signature instead of
         # performing signature recovery if a valid `n` field is provided.
-        if not ecc.ECPubkey(addr.pubkey).verify_message_hash(sigdecoded[:64], hrp_hash):
-            raise LnDecodeException("bad signature")
+        ecc.ECPubkey(addr.pubkey).verify_message_hash(sigdecoded[:64], hrp_hash)
         pubkey_copy = addr.pubkey
         class WrappedBytesKey:
             serialize = lambda: pubkey_copy
