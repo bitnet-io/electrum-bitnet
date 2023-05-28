@@ -19,7 +19,7 @@ date +%s
 
 # macOS (requires python3 , xcode command line tools)
 ```
-cd electrum-radiocoin
+cd electrum-bitnet
 python3 -m pip install --upgrade pip
 python3 -m pip install .
 python3 -m pip install PyQt5
