@@ -12,7 +12,7 @@ date +%s
 
 # for android -> see releases
 
-# https://github.com/c4pt000/electrum-bitnet/releases/tag/android
+# https://github.com/bitnet-io/electrum-bitnet/releases/tag/android
 
 
 
@@ -119,8 +119,8 @@ and [for macOS](contrib/osx/README_macos.md))_
 
 Check out the code from GitHub:
 ```
-$ git clone https://github.com/spesmilo/electrum.git
-$ cd electrum
+$ git clone https://github.com/bitnet-io/electrum-bitnet
+$ cd electrum-bitnet
 $ git submodule update --init
 ```
 
@@ -163,14 +163,5 @@ $ pytest electrum/tests/test_bitcoin.py -v
 
 ## Contributing
 
-Any help testing the software, reporting or fixing bugs, reviewing pull requests
-and recent changes, writing tests, or helping with outstanding issues is very welcome.
-Implementing new features, or improving/refactoring the codebase, is of course
-also welcome, but to avoid wasted effort, especially for larger changes,
-we encourage discussing these on the issue tracker or IRC first.
-
-Besides [GitHub](https://github.com/spesmilo/electrum),
-most communication about Electrum development happens on IRC, in the
-`#electrum` channel on Libera Chat. The easiest way to participate on IRC is
-with the web client, [web.libera.chat](https://web.libera.chat/#electrum).
+see Bitnet -> Discord server
 
