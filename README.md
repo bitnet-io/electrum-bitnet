@@ -12,7 +12,7 @@ date +%s
 
 # for android -> see releases
 
-# https://github.com/bitnet-io/electrum-bitnet/releases/tag/android
+# https://github.com/bitnet-io/electrum-bitnet/releases/tag/electrum-android
 
 
 
