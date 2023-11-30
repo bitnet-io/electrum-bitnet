@@ -1,3 +1,25 @@
+
+# 11-30-2023
+
+# IMPORTANT READ THIS FIRST BEFORE BUILDING OR DOWNLOADING A RELEASE ABOUT SEED PHRASE IMPORT / EXPORT BETWEEN VERIONS https://github.com/bitnet-io/electrum-bitnet-4.2.2/blob/main/note-about-private-keys.txt
+
+## WHAT IS WORKING WHAT IS NOT WORKING BETWEEN DIFFERENT VERSIONS
+
+IT IS NOT POSSIBLE TO EXPORT SEED PHRASE FROM 4.2.2 DESKTOP and IMPORT INTO 4.2.2 android
+
+when sending a transaction using the camera IT IS NOT POSSIBLE TO SCAN A QR CODE USING THE ANDROID 4.2.2 VERSION FROM A DESKTOP VERSION 4.2.2 (but 4.2.2 android will scan 4.1.5 receving address segwit QR codes fine)
+
+so that two wallets are linked:: IT IS POSSIBLE TO EXPORT A WALLET ADDRESS PRIVATE KEY FROM 4.2.2 android and import the private key receving address into 4.2.2 desktop (4.2.2 android and 4.1.5 android do not support import of private keys only export of private keys)
+
+
+
+
+
+
+
+
+
+
 # 11-23-2021 working send / receive 
 # 11-23-2021 (fixed server side , HAD no BIT to test binance.us delay up to 5 days?)
 
